@@ -113,7 +113,7 @@ void main_task(intptr_t exinf)
 		prev = now;
 
 		/* タイマー取得 */
-		timer = main_get_timer();
+		timer = main_get_timer() * 1000;
 
 		/* メッセージ待ち */
 		ret = trcv_dtq(MAIN_DATAQUEUE, (intptr_t *)&msg, timer);
@@ -214,10 +214,6 @@ void mrb_mruby_others_gem_init(mrb_state* mrb);
 void mrb_mruby_others_gem_final(mrb_state* mrb);
 
 extern const uint8_t main_rb_code[];
-
-static void mruby_init()
-{
-}
 
 /*
  * 初期化
