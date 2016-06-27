@@ -61,9 +61,12 @@
 #include <netinet/in_itron.h>
 #include <tinet_nic_defs.h>
 #include <tinet_cfg.h>
-#include <netinet/in4_var.h>
+#include <netinet/in_var.h>
 #include <net/ethernet.h>
 #include <net/if6_var.h>
+#include <net/net.h>
+#include <net/if_var.h>
+#include <netinet/udp_var.h>
 #include <ethernet_api.h>
 
 uint8_t mac_addr[6] = { 0x00, 0x30, 0x13, 0x06, 0x62, 0xC0 };
@@ -82,7 +85,7 @@ static TMO main_get_timer();
 static void main_progress(TMO interval);
 static void main_recieve_msg(struct udp_msg *msg);
 static void main_release_msg(struct udp_msg *msg);
-static void main_timeout();
+static void main_call_timeout();
 
 /*
  *  メインタスク
@@ -113,7 +116,9 @@ void main_task(intptr_t exinf)
 		prev = now;
 
 		/* タイマー取得 */
-		timer = main_get_timer() * 1000;
+		timer = main_get_timer();
+		if (timer != TMO_FEVR)
+			timer *= 1000;
 
 		/* メッセージ待ち */
 		ret = trcv_dtq(MAIN_DATAQUEUE, (intptr_t *)&msg, timer);
@@ -153,7 +158,7 @@ void main_task(intptr_t exinf)
 		}
 
 		/* タイムアウト処理 */
-		main_timeout();
+		main_call_timeout();
 	}
 
 	main_finalize();
@@ -200,10 +205,10 @@ static void netif_link_callback(T_IFNET *ether) {
 	memset(msg, 0, sizeof(struct udp_msg));
 
 	msg->len = 1;
-	msg->buffer[0] = ether->_flags;
+	msg->buffer[0] = ether->flags;
 
 	msg_no = (msg_no + 1) % 2;
-	return snd_dtq(MAIN_DATAQUEUE, (intptr_t)msg);
+	snd_dtq(MAIN_DATAQUEUE, (intptr_t)msg);
 }
 
 mrb_state *mrb;
@@ -251,7 +256,7 @@ static TMO main_get_timer()
 {
 	mrb_value result;
 
-	result = mrb_funcall(mrb, main_obj, "get_timer", 0);
+	result = mrb_funcall(mrb, main_obj, "timer", 0);
 	if(mrb_fixnum_p(result))
 		return mrb_fixnum(result);
 
@@ -291,9 +296,9 @@ static void main_release_msg(struct udp_msg *msg)
 {
 }
 
-static void main_timeout()
+static void main_call_timeout()
 {
-	mrb_funcall(mrb, main_obj, "timeout", 0);
+	mrb_funcall(mrb, main_obj, "call_timeout", 0);
 }
 
 static mrb_value mrb_sample_main_set(mrb_state *mrb, mrb_value self)

@@ -55,10 +55,33 @@ class LocalNode < ECNL::ENode
 		super(eojx3, eprpinib_table)
 	end
 
-	def node_profile_object_fault_content_set(prop, dst)
+	# 異常内容設定関数
+	def node_profile_object_fault_content_set(prop, src)
+		# サイズが2以外は受け付けない
+		if (src.bytesize != 2) then
+			return 0
+		end
+
+		if (prop.anno) then
+			prop.set_anno(prop.exinf != src)
+		end
+
+		val = src.getbyte(0) << 8 | src.getbyte(1)
+
+		if ((val >= 0x0) && (val <= 0x3ec)) then
+			prop.set_exinf(val)
+			# TODO: このの場合の処理
+		# 上記以外は受け付けない
+		else
+			return 0
+		end
+
+		return 2
 	end
 
-	def onoff_prop_set(prop, dst)
+	# 動作状態ON/OFF設定関数（0x30, 0x31のみ受け付け）
+	def onoff_prop_set(prop, src)
+		return 0
 	end
 end
 
@@ -99,22 +122,112 @@ class ControllerObj < ECNL::EObject
 		super(0x05, 0xFF, eojx3, enod, eprpinib_table)
 	end
 
-	def onoff_prop_set(prop, dst)
+	# 動作状態ON/OFF設定関数（0x30, 0x31のみ受け付け）
+	def onoff_prop_set(prop, src)
+		# サイズが１以外は受け付けない
+		if (src.bytesize != 1) then
+			return 0
+		end
+
+		if (prop.anno) then
+			prop.set_anno(prop.exinf != src)
+		end
+
+		case (src.getbyte(0))
+		# ONの場合
+		when 0x30 then
+			prop.set_exinf(src)
+			# LEDの"."をON
+			digitalWrite(1, 1)
+		# OFFの場合
+		when 0x31 then
+			prop.set_exinf(src)
+			# LEDの"."をOFF
+			digitalWrite(1, 0)
+		# 0x30か0x31以外は受け付けない
+		else
+			return 0
+		end
+
+		return 1
 	end
 
-	def alarm_prop_set(prop, dst)
+	# 異常発生状態設定関数（0x41, 0x42のみ受け付け）
+	def alarm_prop_set(prop, src)
+		# サイズが１以外は受け付けない
+		if (src.bytesize != 1) then
+			return 0
+		end
+
+		if (prop.anno) then
+			prop.set_anno(prop.exinf != src)
+		end
+
+		case (src.getbyte(0))
+		# 異常発生あり/なしの場合
+		when 0x41,0x42 then
+			prop.set_exinf(src)
+		# 0x41か0x42以外は受け付けない
+		else
+			return 0
+		end
+
+		return 1
 	end
 
+	# 現在年月日取得関数
 	def date_prop_get(prop, size)
+		# サイズが４以外は受け付けない
+		if (size != 4) then
+			return 0
+		end
+
+		time = Rtc.getTime
+
+		return ((time[0] & 0xFF00) >> 8).chr + (time[0] & 0xFF).chr + time[1].chr + time[2].chr
 	end
 
-	def date_prop_set(prop, dst)
+	# 現在年月日設定関数
+	def date_prop_set(prop, src)
+		# サイズが４以外は受け付けない
+		if (src.bytesize != 4) then
+			return 0
+		end
+
+		time = Rtc.getTime
+		time[0] = (src.getbyte(0) << 8) | src.getbyte(1)
+		time[1] = src.getbyte(2)
+		time[2] = src.getbyte(3)
+		Rtc.setTime time[0], time[1], time[2], time[3], time[4], time[5]
+
+		return 4
 	end
 
+	# 現在時刻取得関数
 	def time_prop_get(prop, size)
+		# サイズが２以外は受け付けない
+		if (size != 2) then
+			return 0
+		end
+
+		time = Rtc.getTime
+
+		return time[3].chr + time[4].chr
 	end
 
-	def time_prop_set(prop, dst)
+	# 現在時刻設定関数
+	def time_prop_set(prop, src)
+		# サイズが２以外は受け付けない
+		if (src.bytesize != 2) then
+			return 0
+		end
+
+		time = Rtc.getTime
+		time[3] = src.getbyte(0)
+		time[4] = src.getbyte(1)
+		Rtc.setTime time[0], time[1], time[2], time[3], time[4], time[5]
+
+		return 2
 	end
 end
 
@@ -122,43 +235,25 @@ class Controller < ECNL::SvcTask
 	def initialize()
 		@profile = LocalNode.new(0x01)
 		@devices = [ ControllerObj.new(0x01, @profile) ]
+		@enodadrb_table = []
 
 		super()
 
 		# 7segを"0"と表示
 		TargetBoard::set_led(0xC0)
 
-		@timer = 1000
-	end
-
-	def get_timer()
-		timer = super()
-
-		if timer < 0 || @timer < timer then
-			timer = @timer
-		end
-
-		timer
-	end
-
-	def progress(interval)
-		super(interval)
-
-		@timer -= interval
-		if @timer < 0 then
-			@timer = 0
-		end
+		set_timer(1000)
 	end
 
 	def recv_esv(esv)
-		if (esv.get_esv() != ECNL::ESV_GET_RES) && (esv.esv != ECNL::ESV_GET_SNA) then
+		if (esv.esv != ECNL::ESV_GET_RES) && (esv.esv != ECNL::ESV_GET_SNA) then
 			return
 		end
 
 		itr = esv.itr_ini()
 		itr.itr_nxt()
 		until itr.is_eof do
-			if itr.get_epc() == 0xD6 then
+			if itr.epc == 0xD6 then
 				TargetBoard::set_led(0xF9)
 			end
 			itr.itr_nxt()
@@ -169,13 +264,10 @@ class Controller < ECNL::SvcTask
 	end
 
 	def timeout()
-		super()
+		esv = esv_get(nil, 0xD6)
+		snd_esv(esv)
 
-		if @timer == 0 then
-			esv = esv_get(nil, 0xD6)
-			snd_esv(esv)
-			@timer = 10000
-		end
+		set_timer(10000)
 	end
 
 	def snd_msg(ep, data)
@@ -191,8 +283,8 @@ class Controller < ECNL::SvcTask
 		TargetBoard::is_multicast_addr(ep)
 	end
 
-	def equals_addr(ep1, ep2)
-		TargetBoard::equals_addr(ep1, ep2)
+	def is_valid_addrid(id)
+		(id >= 0) && ((id - ECNL::ENOD_REMOTE_ID) < @enodadrb_table.length)
 	end
 
 	def get_local_addr()
@@ -201,6 +293,78 @@ class Controller < ECNL::SvcTask
 
 	def get_multicast_addr()
 		TargetBoard::get_multicast_addr()
+	end
+
+	def get_remote_addr(id)
+		index = id - ECNL::ENOD_REMOTE_ID
+		if (index < 0) || (index >= @enodadrb_table.length)
+			nil
+		else
+			@enodadrb_table[index]
+		end
+	end
+
+	# 通信レイヤーアドレスの同じものを検索
+	def get_remote_id(ep)
+		id = ECNL::ENOD_REMOTE_ID - 1
+		for ea in @enodadrb_table do
+			id += 1
+			if !ea then
+				next
+			end
+			if !TargetBoard::equals_addr(ea, ep) then
+				next
+			end
+
+			return id
+		end
+
+		return ECNL::ENOD_NOT_MATCH_ID
+	end
+
+	# 対応するリモートノードを検索
+	def set_remote_addr(edata, ep)
+		id = ECNL::ENOD_REMOTE_ID - 1
+		for ea in @enodadrb_table do
+			id += 1
+			if !ea then
+				next
+			end
+			if !is_match(svc, edata, ep) then
+				next
+			end
+
+			# 対応するリモートノードがあれば通信レイヤーアドレスを設定
+			@enodadrb_table[id - ECNL::ENOD_REMOTE_ID] = ep
+
+			return id
+		end
+
+		return ECNL::ENOD_NOT_MATCH_ID
+	end
+
+	# 空き領域を探して自動登録
+	def add_remote_addr(edata, ep)
+		id = ECNL::ENOD_REMOTE_ID - 1
+		for ea in @enodadrb_table do
+			id += 1
+			if ea then
+				next
+			end
+
+			@enodadrb_table[id - ECNL::ENOD_REMOTE_ID] = ep
+
+			return id
+		end
+
+		if @enodadrb_table.length >= 100 then
+			return ECNL::ENOD_NOT_MATCH_ID
+		end
+
+		id = @enodadrb_table.length;
+		@enodadrb_table[id] = ep
+
+		return id + ECNL::ENOD_REMOTE_ID
 	end
 end
 

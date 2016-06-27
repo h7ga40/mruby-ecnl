@@ -103,7 +103,7 @@ typedef struct ecn_lcl_msg_get_lcladdr_res
 {
 	unsigned int requestid;
 	ECN_ENOD_ID enodid;
-	ENODADRB enodadrb;
+	mrb_value enodadrb;
 } ecn_lcl_msg_get_lcladdr_res_t;
 
 typedef struct ecn_lcl_msg_get_lcladdr_error

@@ -374,10 +374,22 @@ static mrb_value mrb_ecnl_eproperty_get_exinf(mrb_state *mrb, mrb_value self)
 
 	prop = (T_MRB_ECNL_EPROPERTY *)DATA_PTR(self);
 
-	if (prop->inib.exinf == 0)
-		return mrb_nil_value();
+	return mrb_iv_get(mrb, prop->eobj, prop->exinf);
+}
 
-	return mrb_symbol_value((mrb_sym)prop->inib.exinf);
+/* ECHONET Lite プロパティの拡張情報設定 */
+static mrb_value mrb_ecnl_eproperty_set_exinf(mrb_state *mrb, mrb_value self)
+{
+	T_MRB_ECNL_EPROPERTY *prop;
+	mrb_value exinf;
+
+	mrb_get_args(mrb, "o", &exinf);
+
+	prop = (T_MRB_ECNL_EPROPERTY *)DATA_PTR(self);
+
+	mrb_iv_set(mrb, prop->eobj, prop->exinf, exinf);
+
+	return exinf;
 }
 
 /* ECHONET Lite プロパティの設定関数 */
@@ -406,6 +418,34 @@ static mrb_value mrb_ecnl_eproperty_get_getcb(mrb_state *mrb, mrb_value self)
 	return mrb_symbol_value(prop->eprpget);
 }
 
+/* ECHONET Lite プロパティの通知有無 */
+static mrb_value mrb_ecnl_eproperty_get_anno(mrb_state *mrb, mrb_value self)
+{
+	T_MRB_ECNL_EPROPERTY *prop;
+
+	prop = (T_MRB_ECNL_EPROPERTY *)DATA_PTR(self);
+
+	if (prop->anno)
+		return mrb_true_value();
+
+	return mrb_false_value();
+}
+
+/* ECHONET Lite プロパティの通知有無設定 */
+static mrb_value mrb_ecnl_eproperty_set_anno(mrb_state *mrb, mrb_value self)
+{
+	T_MRB_ECNL_EPROPERTY *prop;
+	mrb_value anno;
+
+	mrb_get_args(mrb, "b", &anno);
+
+	prop = (T_MRB_ECNL_EPROPERTY *)DATA_PTR(self);
+
+	prop->anno = mrb_type(anno) != MRB_TT_FALSE;
+
+	return anno;
+}
+
 static T_MRB_ECNL_EPROPERTY *cast_prop(const EPRPINIB *inib)
 {
 	return (T_MRB_ECNL_EPROPERTY *)((intptr_t)inib - offsetof(T_MRB_ECNL_EPROPERTY, inib));
@@ -424,14 +464,13 @@ static int mrb_ecnl_prop_set(ecnl_svc_task_t *svc, const EPRPINIB *item, const v
 	if (prop->eprpset == 0)
 		return 0;
 
-	if (*anno)
-		prop->anno = *anno;
+	prop->anno = *anno;
 
 	args[0] = mrb_obj_value(mrb_obj_alloc(mrb, MRB_TT_DATA, _class_property));
 	DATA_TYPE(args[0]) = &mrb_ecnl_eproperty_type;
 	DATA_PTR(args[0]) = prop;
 
-	args[1] = mrb_str_new(mrb, src, size);
+	args[1] = mrb_str_new_static(mrb, src, size);
 
 	ret = mrb_funcall_argv(mrb, prop->eobj, prop->eprpset, 2, args);
 
@@ -440,7 +479,8 @@ static int mrb_ecnl_prop_set(ecnl_svc_task_t *svc, const EPRPINIB *item, const v
 		return 0;
 	}
 
-	*anno = prop->anno;
+	if (*anno)
+		*anno = prop->anno;
 
 	return mrb_fixnum(ret);
 }
@@ -719,15 +759,10 @@ static mrb_value mrb_ecnl_svctask_initialize(mrb_state *mrb, mrb_value self)
 	eobjs = RARRAY_PTR(devices);
 	count = RARRAY_LEN(devices);
 
-	svc = (ecnl_svc_task_t *)mrb_malloc(mrb, sizeof(ecnl_svc_task_t) + (1 + count) * sizeof(EOBJINIB *));
+	svc = (ecnl_svc_task_t *)mrb_calloc(mrb, 1, sizeof(ecnl_svc_task_t) + (1 + count) * sizeof(EOBJINIB *));
 	DATA_TYPE(self) = &mrb_ecnl_svctask_type;
 	DATA_PTR(self) = svc;
 
-	memset(&svc->agent, 0, sizeof(svc->agent));
-	memset(&svc->enodadrb_table, 0, sizeof(svc->enodadrb_table));
-	memset(&svc->api_mbxid, 0, sizeof(svc->api_mbxid));
-	memset(&svc->svc_mbxid, 0, sizeof(svc->svc_mbxid));
-	memset(&svc->lcl_mbxid, 0, sizeof(svc->lcl_mbxid));
 	svc->eobjlist_need_init = 1;
 	svc->current_tid = 1;
 
@@ -737,7 +772,6 @@ static mrb_value mrb_ecnl_svctask_initialize(mrb_state *mrb, mrb_value self)
 	svc->tmax_eobjid = 1 + 1 + count;
 	svc->eobjinib_table = (const EOBJINIB **)&svc[1];
 	svc->eobjinib_table[0] = &node->base.inib;
-	svc->tnum_enodadr = TNUM_ENODADR;
 
 	eobjcb = &svc->eobjcb_table[0];
 	eobjcb->eobjs = &svc->eobjinib_table[1];
@@ -1139,6 +1173,19 @@ static mrb_value mrb_ecnl_svctask_ntf_inl(mrb_state *mrb, mrb_value self)
 	return self;
 }
 
+static mrb_value mrb_ecnl_svctask_set_timer(mrb_state *mrb, mrb_value self)
+{
+	TMO timer;
+	ecnl_svc_task_t *svc;
+
+	mrb_get_args(mrb, "i", &timer);
+
+	svc = (ecnl_svc_task_t *)DATA_PTR(self);
+	svc->api_timer = timer;
+
+	return self;
+}
+
 static mrb_value mrb_ecnl_svctask_get_timer(mrb_state *mrb, mrb_value self)
 {
 	TMO timer1, timer2;
@@ -1148,8 +1195,12 @@ static mrb_value mrb_ecnl_svctask_get_timer(mrb_state *mrb, mrb_value self)
 	svc->mrb = mrb;
 
 	timer1 = echonet_svctask_get_timer(svc);
-	timer2 = echonet_lcltask_get_timer(svc);
 
+	timer2 = echonet_lcltask_get_timer(svc);
+	if ((timer1 == TMO_FEVR) || (timer1 > timer2))
+		timer1 = timer2;
+
+	timer2 = svc->api_timer;
 	if ((timer1 == TMO_FEVR) || (timer1 > timer2))
 		timer1 = timer2;
 
@@ -1159,15 +1210,20 @@ static mrb_value mrb_ecnl_svctask_get_timer(mrb_state *mrb, mrb_value self)
 static mrb_value mrb_ecnl_svctask_progress(mrb_state *mrb, mrb_value self)
 {
 	ecnl_svc_task_t *svc;
-	TMO timer;
+	TMO interval;
 
 	svc = (ecnl_svc_task_t *)DATA_PTR(self);
 	svc->mrb = mrb;
 
-	mrb_get_args(mrb, "i", &timer);
+	mrb_get_args(mrb, "i", &interval);
 
-	echonet_svctask_progress(svc, timer);
-	echonet_lcltask_progress(svc, timer);
+	echonet_svctask_progress(svc, interval);
+	echonet_lcltask_progress(svc, interval);
+
+	svc->api_timer -= interval;
+	if (svc->api_timer < 0) {
+		svc->api_timer = 0;
+	}
 
 	return mrb_nil_value();
 }
@@ -1211,7 +1267,7 @@ void echonet_apptask_recv_msg(ecnl_svc_task_t *svc, T_ECN_FST_BLK *p_msg)
 		main_recv_esv(svc, (T_EDATA *)p_msg);
 
 		/* 領域解放 */
-		ret = ecn_rel_esv(NULL, (T_EDATA *)p_msg);
+		ret = ecn_rel_esv(mrb, (T_EDATA *)p_msg);
 		if (ret != E_OK) {
 			mrb_raise(mrb, E_RUNTIME_ERROR, "ecn_rel_esv");
 			return;
@@ -1220,7 +1276,7 @@ void echonet_apptask_recv_msg(ecnl_svc_task_t *svc, T_ECN_FST_BLK *p_msg)
 	/* 応答電文待ちの割り込みの場合 */
 	else if ((p_msg)->hdr.type == ECN_MSG_INTERNAL) {
 		/* 応答電文待ちの割り込みデータ取得 */
-		ret = ecn_get_brk_dat(NULL, (T_EDATA *)p_msg, brkdat, sizeof(brkdat), &len);
+		ret = ecn_get_brk_dat(mrb, (T_EDATA *)p_msg, brkdat, sizeof(brkdat), &len);
 		if (ret != E_OK) {
 			mrb_raise(mrb, E_RUNTIME_ERROR, "ecn_get_brk_dat");
 			return;
@@ -1230,7 +1286,7 @@ void echonet_apptask_recv_msg(ecnl_svc_task_t *svc, T_ECN_FST_BLK *p_msg)
 		main_break_wait(svc, brkdat, len);
 
 		/* 領域解放 */
-		ret = ecn_rel_esv(NULL, (T_EDATA *)p_msg);
+		ret = ecn_rel_esv(mrb, (T_EDATA *)p_msg);
 		if (ret != E_OK) {
 			mrb_raise(mrb, E_RUNTIME_ERROR, "ecn_rel_esv");
 			return;
@@ -1286,7 +1342,7 @@ static mrb_value mrb_ecnl_svctask_recv_msg(mrb_state *mrb, mrb_value self)
 	return mrb_nil_value();
 }
 
-static mrb_value mrb_ecnl_svctask_timeout(mrb_state *mrb, mrb_value self)
+static mrb_value mrb_ecnl_svctask_call_timeout(mrb_state *mrb, mrb_value self)
 {
 	ecnl_svc_task_t *svc;
 
@@ -1295,6 +1351,12 @@ static mrb_value mrb_ecnl_svctask_timeout(mrb_state *mrb, mrb_value self)
 
 	echonet_svctask_timeout(svc);
 	echonet_lcltask_timeout(svc);
+
+	if (svc->api_timer == 0) {
+		svc->api_timer = -1;
+
+		mrb_funcall(mrb, svc->self, "timeout", 0);
+	}
 
 	mrb_ecnl_svctask_proccess(svc);
 
@@ -1358,12 +1420,12 @@ bool_t lcl_is_multicast_addr(ecnl_svc_task_t *svc, mrb_value ep)
 	return false;
 }
 
-bool_t lcl_equals_addr(ecnl_svc_task_t *svc, mrb_value ep1, mrb_value ep2)
+bool_t lcl_is_valid_addrid(ecnl_svc_task_t *svc, ECN_ENOD_ID id)
 {
 	mrb_state *mrb = svc->mrb;
 	mrb_value ret;
 
-	ret = mrb_funcall(mrb, svc->self, "equals_addr", 2, ep1, ep2);
+	ret = mrb_funcall(mrb, svc->self, "is_valid_addrid", 1, mrb_fixnum_value(id));
 
 	if (mrb_type(ret) == MRB_TT_TRUE)
 		return true;
@@ -1371,7 +1433,7 @@ bool_t lcl_equals_addr(ecnl_svc_task_t *svc, mrb_value ep1, mrb_value ep2)
 	if (mrb_type(ret) == MRB_TT_FALSE)
 		return false;
 
-	mrb_raise(mrb, E_RUNTIME_ERROR, "equals_addr");
+	mrb_raise(mrb, E_RUNTIME_ERROR, "is_valid_addrid");
 	return false;
 }
 
@@ -1385,23 +1447,59 @@ mrb_value lcl_get_multicast_addr(ecnl_svc_task_t *svc)
 	return mrb_funcall(svc->mrb, svc->self, "get_multicast_addr", 0);
 }
 
-bool_t lcl_is_match(ecnl_svc_task_t *svc, struct ecn_node *enodcb, T_EDATA *edata, mrb_value ep)
+mrb_value lcl_get_remote_addr(ecnl_svc_task_t *svc, ECN_ENOD_ID id)
+{
+	return mrb_funcall(svc->mrb, svc->self, "get_remote_addr", 1, mrb_fixnum_value(id));
+}
+
+ECN_ENOD_ID lcl_get_remote_id(ecnl_svc_task_t *svc, const mrb_value ep)
 {
 	mrb_state *mrb = svc->mrb;
-	mrb_value enod = mrb_obj_value(enodcb);
+	mrb_value ret;
+
+	ret = mrb_funcall(mrb, svc->self, "get_remote_id", 1, ep);
+
+	if (mrb_type(ret) == MRB_TT_FALSE)
+		return ENOD_NOT_MATCH_ID;
+
+	if (mrb_type(ret) == MRB_TT_FIXNUM)
+		return (ECN_ENOD_ID)mrb_fixnum(ret);
+
+	return ENOD_NOT_MATCH_ID;
+}
+
+ECN_ENOD_ID lcl_set_remote_addr(ecnl_svc_task_t *svc, T_EDATA *edata, mrb_value ep)
+{
+	mrb_state *mrb = svc->mrb;
 	mrb_value edat = mrb_obj_value(edata);
 	mrb_value ret;
 
-	ret = mrb_funcall(mrb, svc->self, "is_match", 3, enod, edat, ep);
-
-	if (mrb_type(ret) == MRB_TT_TRUE)
-		return true;
+	ret = mrb_funcall(mrb, svc->self, "set_remote_addr", 2, edat, ep);
 
 	if (mrb_type(ret) == MRB_TT_FALSE)
-		return false;
+		return ENOD_NOT_MATCH_ID;
 
-	mrb_raise(mrb, E_RUNTIME_ERROR, "is_match");
-	return false;
+	if (mrb_type(ret) == MRB_TT_FIXNUM)
+		return (ECN_ENOD_ID)mrb_fixnum(ret);
+
+	return ENOD_NOT_MATCH_ID;
+}
+
+ECN_ENOD_ID lcl_add_remote_addr(ecnl_svc_task_t *svc, T_EDATA *edata, mrb_value ep)
+{
+	mrb_state *mrb = svc->mrb;
+	mrb_value edat = mrb_obj_value(edata);
+	mrb_value ret;
+
+	ret = mrb_funcall(mrb, svc->self, "add_remote_addr", 2, edat, ep);
+
+	if (mrb_type(ret) == MRB_TT_FALSE)
+		return ENOD_NOT_MATCH_ID;
+
+	if (mrb_type(ret) == MRB_TT_FIXNUM)
+		return (ECN_ENOD_ID)mrb_fixnum(ret);
+
+	return ENOD_NOT_MATCH_ID;
 }
 
 ER lcl_snd_msg(ecnl_svc_task_t *svc, mrb_value ep, mrb_value msg)
@@ -1461,6 +1559,17 @@ void mrb_mruby_ecnl_gem_init(mrb_state *mrb)
 	/* プロパティ値書き込み・読み出し不可応答	*/
 	mrb_define_const(mrb, _module_ecnl, "ESV_SET_GET_SNA", mrb_fixnum_value(ESV_SET_GET_SNA));
 
+	/* アドレスID登録なし */
+	mrb_define_const(mrb, _module_ecnl, "ENOD_NOT_MATCH_ID", mrb_fixnum_value(ENOD_NOT_MATCH_ID));
+	/* マルチキャストアドレスID */
+	mrb_define_const(mrb, _module_ecnl, "ENOD_MULTICAST_ID", mrb_fixnum_value(ENOD_MULTICAST_ID));
+	/* 自ノードアドレスID */
+	mrb_define_const(mrb, _module_ecnl, "ENOD_LOCAL_ID", mrb_fixnum_value(ENOD_LOCAL_ID));
+	/* APIアドレスID */
+	mrb_define_const(mrb, _module_ecnl, "ENOD_API_ID", mrb_fixnum_value(ENOD_API_ID));
+	/* 他ノードID */
+	mrb_define_const(mrb, _module_ecnl, "ENOD_REMOTE_ID", mrb_fixnum_value(ENOD_REMOTE_ID));
+
 	_class_object = mrb_define_class_under(mrb, _module_ecnl, "EObject", mrb->object_class);
 	MRB_SET_INSTANCE_TT(_class_object, MRB_TT_DATA);
 	mrb_define_method(mrb, _class_object, "initialize", mrb_ecnl_eobject_initialize, MRB_ARGS_REQ(5));
@@ -1486,17 +1595,21 @@ void mrb_mruby_ecnl_gem_init(mrb_state *mrb)
 	mrb_define_method(mrb, _class_property, "initialize", mrb_ecnl_eproperty_initialize, MRB_ARGS_REQ(6));
 
 	/* ECHONET Lite プロパティコード */
-	mrb_define_method(mrb, _class_property, "get_pcd", mrb_ecnl_eproperty_get_pcd, MRB_ARGS_NONE());
+	mrb_define_method(mrb, _class_property, "pcd", mrb_ecnl_eproperty_get_pcd, MRB_ARGS_NONE());
 	/* ECHONET Lite プロパティ属性 */
-	mrb_define_method(mrb, _class_property, "get_atr", mrb_ecnl_eproperty_get_atr, MRB_ARGS_NONE());
+	mrb_define_method(mrb, _class_property, "atr", mrb_ecnl_eproperty_get_atr, MRB_ARGS_NONE());
 	/* ECHONET Lite プロパティのサイズ */
-	mrb_define_method(mrb, _class_property, "get_sz", mrb_ecnl_eproperty_get_sz, MRB_ARGS_NONE());
+	mrb_define_method(mrb, _class_property, "sz", mrb_ecnl_eproperty_get_sz, MRB_ARGS_NONE());
 	/* ECHONET Lite プロパティの拡張情報 */
-	mrb_define_method(mrb, _class_property, "get_exinf", mrb_ecnl_eproperty_get_exinf, MRB_ARGS_NONE());
+	mrb_define_method(mrb, _class_property, "exinf", mrb_ecnl_eproperty_get_exinf, MRB_ARGS_NONE());
+	mrb_define_method(mrb, _class_property, "set_exinf", mrb_ecnl_eproperty_set_exinf, MRB_ARGS_REQ(1));
 	/* ECHONET Lite プロパティの設定関数 */
-	mrb_define_method(mrb, _class_property, "get_setcb", mrb_ecnl_eproperty_get_setcb, MRB_ARGS_NONE());
+	mrb_define_method(mrb, _class_property, "setcb", mrb_ecnl_eproperty_get_setcb, MRB_ARGS_NONE());
 	/* ECHONET Lite プロパティの取得関数 */
-	mrb_define_method(mrb, _class_property, "get_getcb", mrb_ecnl_eproperty_get_getcb, MRB_ARGS_NONE());
+	mrb_define_method(mrb, _class_property, "getcb", mrb_ecnl_eproperty_get_getcb, MRB_ARGS_NONE());
+	/* ECHONET Lite プロパティの通知有無 */
+	mrb_define_method(mrb, _class_property, "anno", mrb_ecnl_eproperty_get_anno, MRB_ARGS_NONE());
+	mrb_define_method(mrb, _class_property, "set_anno", mrb_ecnl_eproperty_set_anno, MRB_ARGS_REQ(1));
 
 	_class_data = mrb_define_class_under(mrb, _module_ecnl, "EData", mrb->object_class);
 	MRB_SET_INSTANCE_TT(_class_data, MRB_TT_DATA);
@@ -1512,7 +1625,7 @@ void mrb_mruby_ecnl_gem_init(mrb_state *mrb)
 	mrb_define_method(mrb, _class_data, "add_edt", mrb_ecnl_add_edt, MRB_ARGS_REQ(2));
 
 	/* 応答電文サービスコード取得 */
-	mrb_define_method(mrb, _class_data, "get_esv", mrb_ecnl_get_esv, MRB_ARGS_NONE());
+	mrb_define_method(mrb, _class_data, "esv", mrb_ecnl_get_esv, MRB_ARGS_NONE());
 
 	/* 応答電文解析イテレーター初期化 */
 	mrb_define_method(mrb, _class_data, "itr_ini", mrb_ecnl_itr_ini, MRB_ARGS_NONE());
@@ -1524,9 +1637,9 @@ void mrb_mruby_ecnl_gem_init(mrb_state *mrb)
 	/* 応答電文解析イテレーターインクリメント */
 	mrb_define_method(mrb, _class_iterator, "itr_nxt", mrb_ecnl_itr_nxt, MRB_ARGS_NONE());
 
-	mrb_define_method(mrb, _class_iterator, "get_epc", mrb_ecnl_iterator_get_epc, MRB_ARGS_NONE());
-	mrb_define_method(mrb, _class_iterator, "get_edt", mrb_ecnl_iterator_get_edt, MRB_ARGS_NONE());
-	mrb_define_method(mrb, _class_iterator, "get_state", mrb_ecnl_iterator_get_state, MRB_ARGS_NONE());
+	mrb_define_method(mrb, _class_iterator, "epc", mrb_ecnl_iterator_get_epc, MRB_ARGS_NONE());
+	mrb_define_method(mrb, _class_iterator, "edt", mrb_ecnl_iterator_get_edt, MRB_ARGS_NONE());
+	mrb_define_method(mrb, _class_iterator, "state", mrb_ecnl_iterator_get_state, MRB_ARGS_NONE());
 	mrb_define_method(mrb, _class_iterator, "is_eof", mrb_ecnl_iterator_is_eof, MRB_ARGS_NONE());
 
 	_class_svctask = mrb_define_class_under(mrb, _module_ecnl, "SvcTask", mrb->object_class);
@@ -1561,10 +1674,11 @@ void mrb_mruby_ecnl_gem_init(mrb_state *mrb)
 	mrb_define_method(mrb, _class_svctask, "ntf_inl", mrb_ecnl_svctask_ntf_inl, MRB_ARGS_NONE());
 
 	/* メッセージ処理ループ */
-	mrb_define_method(mrb, _class_svctask, "get_timer", mrb_ecnl_svctask_get_timer, MRB_ARGS_NONE());
+	mrb_define_method(mrb, _class_svctask, "set_timer", mrb_ecnl_svctask_set_timer, MRB_ARGS_REQ(1));
+	mrb_define_method(mrb, _class_svctask, "timer", mrb_ecnl_svctask_get_timer, MRB_ARGS_NONE());
 	mrb_define_method(mrb, _class_svctask, "progress", mrb_ecnl_svctask_progress, MRB_ARGS_REQ(1));
 	mrb_define_method(mrb, _class_svctask, "recv_msg", mrb_ecnl_svctask_recv_msg, MRB_ARGS_REQ(2));
-	mrb_define_method(mrb, _class_svctask, "timeout", mrb_ecnl_svctask_timeout, MRB_ARGS_NONE());
+	mrb_define_method(mrb, _class_svctask, "call_timeout", mrb_ecnl_svctask_call_timeout, MRB_ARGS_NONE());
 
 	/* リモートECHONETノードの適合確認 */
 	mrb_define_method(mrb, _class_svctask, "is_match", mrb_ecnl_svctask_is_match, MRB_ARGS_REQ(3));

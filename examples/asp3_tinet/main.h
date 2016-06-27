@@ -52,7 +52,7 @@
 
 #define MAIN_PRIORITY	5		/* メインタスクの優先度 */
 
-#define MAIN_STACK_SIZE	8192	/* スタック領域のサイズ */
+#define MAIN_STACK_SIZE	16384	/* スタック領域のサイズ */
 
 /*
  *  関数のプロトタイプ宣言
@@ -65,8 +65,6 @@ extern void main_task(intptr_t exinf);
  * ノンブロッキングコールのコールバック関数
  */
 ER callback_nblk_udp(ID cepid, FN fncd, void *p_parblk);
-
-void main_interrupt(void);
 
 #endif /* TOPPERS_MACRO_ONLY */
 

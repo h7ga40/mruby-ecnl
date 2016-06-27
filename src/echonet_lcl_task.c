@@ -69,7 +69,7 @@
 #endif /* ECHONET_LCL_SEND_TO_MBX */
 
 static ECN_ENOD_ID lcl_get_id(ecnl_svc_task_t *svc, T_EDATA *edata, const mrb_value ep);
-static int lcl_get_ip(ecnl_svc_task_t *svc, mrb_value *fp_ipep, ECN_ENOD_ID fa_enodid);
+static mrb_value lcl_get_addr(ecnl_svc_task_t *svc, ECN_ENOD_ID fa_enodid);
 void _ecn_int_msg(ecnl_svc_task_t *svc, ECN_FBS_ID fbs_id, ECN_FBS_SSIZE_T a_snd_len);
 void _ecn_esv_msg(ecnl_svc_task_t *svc, ECN_FBS_ID fbs_id);
 
@@ -116,7 +116,7 @@ ER _ecn_lcl2mbx(ecnl_svc_task_t *svc, const uint8_t *buffer, size_t fa_len, cons
 
 	/* 通信レイヤーアドレスからリモートECHONETノードへ変換 */
 	a_enod_id = lcl_get_id(svc, (T_EDATA *)a_fbs_id.ptr, dst);
-	if (a_enod_id < 0 || svc->tnum_enodadr <= a_enod_id) {
+	if (!lcl_is_valid_addrid(svc, a_enod_id)) {
 		ECN_DBG_PUT_1("[LCL ECHO SRV] lcl src(%s) echonet-node not found.",
 			ip2str(NULL, &dst->lcladdr));
 	} else {
@@ -272,6 +272,7 @@ void _ecn_int_msg(ecnl_svc_task_t *svc, ECN_FBS_ID fbs_id, ECN_FBS_SSIZE_T a_snd
 	ECN_FBS_SSIZE_T len;
 	ECN_FBS_ID buf;
 	uint8_t cmd;
+	mrb_value addr;
 
 	a_ret = _ecn_fbs_get_data(mrb, fbs_id, &cmd, 1, &len);
 	if (a_ret != E_OK) {
@@ -293,7 +294,7 @@ void _ecn_int_msg(ecnl_svc_task_t *svc, ECN_FBS_ID fbs_id, ECN_FBS_SSIZE_T a_snd
 			ECN_DBG_PUT_2("[LCL TSK] _ecn_fbs_get_data() result = %d:%s", a_ret, itron_strerror(a_ret));
 		}
 
-		if ((msg.enodid < 0) && (msg.enodid >= svc->tnum_enodadr)) {
+		if (!lcl_is_valid_addrid(svc, msg.enodid)) {
 			result = E_PAR;
 			break;
 		}
@@ -310,7 +311,8 @@ void _ecn_int_msg(ecnl_svc_task_t *svc, ECN_FBS_ID fbs_id, ECN_FBS_SSIZE_T a_snd
 			return;
 		}
 
-		a_ret = _ecn_fbs_add_data_ex(mrb, buf, &svc->enodadrb_table[msg.enodid], sizeof(svc->enodadrb_table[msg.enodid]));
+		addr = lcl_get_remote_addr(svc, msg.enodid);
+		a_ret = _ecn_fbs_add_data_ex(mrb, buf, &addr, sizeof(addr));
 		if (a_ret != E_OK) {
 			_ecn_fbs_del(mrb, buf);
 			ECN_DBG_PUT_2("_ecn_int_msg() : _ecn_fbs_add_data_ex() result = %d:%s", a_ret, itron_strerror(a_ret));
@@ -361,8 +363,8 @@ void _ecn_esv_msg(ecnl_svc_task_t *svc, ECN_FBS_ID fbs_id)
 	ECN_FBS_SSIZE_T a_snd_len;
 
 	/* 送信先通信レイヤーアドレス */
-	a_ret = lcl_get_ip(svc, &a_dst, fbs_id.ptr->hdr.target.id);
-	if (!a_ret) {
+	a_dst = lcl_get_addr(svc, fbs_id.ptr->hdr.target.id);
+	if (mrb_type(a_dst) != MRB_TT_FALSE/*nil*/) {
 		ECN_DBG_PUT_4("[LCL TSK] echonet-node 0x%02X-0x%02X-0x%02X → lcl dest(%s)",
 			((T_EDATA *)fbs_id.ptr)->hdr.edata.deoj.eojx1,
 			((T_EDATA *)fbs_id.ptr)->hdr.edata.deoj.eojx2,
@@ -511,8 +513,7 @@ bool_t ecn_is_match(ecnl_svc_task_t *svc, const EOBJCB *enodcb, T_EDATA *edata, 
  */
 ECN_ENOD_ID lcl_get_id(ecnl_svc_task_t *svc, T_EDATA *edata, const mrb_value ep)
 {
-	T_ENOD_ADDR	*ea;
-	int			i;
+	ECN_ENOD_ID id;
 
 	if (lcl_is_local_addr(svc, ep))
 		return ENOD_LOCAL_ID;
@@ -520,47 +521,24 @@ ECN_ENOD_ID lcl_get_id(ecnl_svc_task_t *svc, T_EDATA *edata, const mrb_value ep)
 		return ENOD_MULTICAST_ID;
 
 	/* 通信レイヤーアドレスの同じものを検索 */
-	for (i = 0, ea = svc->enodadrb_table; i < svc->tnum_enodadr; i++, ea++) {
-		if (!ea->inuse)
-			continue;
-		if (!lcl_equals_addr(svc, ea->lcladdr, ep))
-			continue;
-
+	if ((id = lcl_get_remote_id(svc, ep)) != ENOD_NOT_MATCH_ID) {
 		ECN_CAP_PUT_2("lcl_get_id(): ip-found remote(%d) = %s",
-			i - ENOD_REMOTE_ID, ip2str(NULL, &lcladdr));
-		return (ECN_ENOD_ID)i;
+			id - ENOD_REMOTE_ID, ip2str(NULL, &lcladdr));
+		return id;
 	}
 
-	/* 対応するリモートノードを検索 */
-	for (i = ENOD_REMOTE_ID, ea = &svc->enodadrb_table[ENOD_REMOTE_ID]; i < svc->tnum_enodadr; i++, ea++) {
-		if (!ea->inuse)
-			continue;
-		if ((i - ENOD_REMOTE_ID + 1) >= svc->tnum_enodid)
-			break;
-		if (mrb_type(ea->lcladdr) != MRB_TT_FALSE/*nil*/)
-			continue;
-		if (!lcl_is_match(svc, /* TODO: */(struct ecn_node *)&svc->eobjcb_table[i - ENOD_REMOTE_ID + 1], edata, ep))
-			continue;
-
-		/* 対応するリモートノードがあれば通信レイヤーアドレスを設定 */
-		ea->lcladdr = ep;
-
+	/* 対応するリモートノードがあれば通信レイヤーアドレスを設定 */
+	if ((id = lcl_set_remote_addr(svc, edata, ep)) != ENOD_NOT_MATCH_ID) {
 		ECN_CAP_PUT_2("lcl_get_id(): enod-found remote(%d) = %s",
-			i - ENOD_REMOTE_ID, ip2str(NULL, &lcladdr));
-		return (ECN_ENOD_ID)i;
+			id - ENOD_REMOTE_ID, ip2str(NULL, &lcladdr));
+		return id;
 	}
 
 	/* 空き領域を探して自動登録 */
-	for (i = ENOD_REMOTE_ID, ea = &svc->enodadrb_table[ENOD_REMOTE_ID]; i < svc->tnum_enodadr; i++, ea++) {
-		if (ea->inuse)
-			continue;
-
-		ea->inuse = true;
-		ea->lcladdr = ep;
-
+	if ((id = lcl_add_remote_addr(svc, edata, ep)) != ENOD_NOT_MATCH_ID) {
 		ECN_CAP_PUT_2("lcl_get_id(): empty-found remote(%d) = %s",
-			i - ENOD_REMOTE_ID, ip2str(NULL, &lcladdr));
-		return (ECN_ENOD_ID)i;
+			id - ENOD_REMOTE_ID, ip2str(NULL, &lcladdr));
+		return id;
 	}
 
 	return ENOD_NOT_MATCH_ID;
@@ -569,37 +547,19 @@ ECN_ENOD_ID lcl_get_id(ecnl_svc_task_t *svc, T_EDATA *edata, const mrb_value ep)
 /*
  *  リモートECHONETノードから通信レイヤーアドレスへ変換
  */
-int lcl_get_ip(ecnl_svc_task_t *svc, mrb_value *fp_ipep, ECN_ENOD_ID fa_enodid)
+mrb_value lcl_get_addr(ecnl_svc_task_t *svc, ECN_ENOD_ID fa_enodid)
 {
-	T_ENOD_ADDR *ea;
-
-	if (!fp_ipep)
-		return -1;	/* NG */
-
 	if (fa_enodid == ENOD_MULTICAST_ID) {
 		/* targetがENOD_MULTICAST_IDの場合、マルチキャストを行う */
-		*fp_ipep = lcl_get_multicast_addr(svc);
-		return 0;	/* ok */
+		return lcl_get_multicast_addr(svc);
 	}
 
 	if (fa_enodid < ENOD_REMOTE_ID) {
 		/* targetが未定義・LOCAL・APIの場合、ローカル配送を行う */
-		*fp_ipep = lcl_get_local_addr(svc);
-		return 0;	/* ok */
+		return lcl_get_local_addr(svc);
 	}
 
-	if (fa_enodid >= svc->tnum_enodadr)
-		return -1;	/* NG */
-
-	ea = &svc->enodadrb_table[fa_enodid];
-	if (!ea->inuse)
-		return -1;	/* NG */
-
-	if (mrb_type(ea->lcladdr) == MRB_TT_FALSE/*nil*/)
-		return -1;	/* NG */
-
-	*fp_ipep = ea->lcladdr;
-	return 0;	/* ok */
+	return lcl_get_remote_addr(svc, fa_enodid);
 }
 
 ER ecn_lcl_get_lcladdr(ecnl_svc_task_t *svc, T_ECN_FBS_QUEUE *sender, int requestid, ECN_ENOD_ID enodid, ECN_FBS_ID *pk_req)
@@ -607,6 +567,7 @@ ER ecn_lcl_get_lcladdr(ecnl_svc_task_t *svc, T_ECN_FBS_QUEUE *sender, int reques
 	mrb_state *mrb = svc->mrb;
 	ER a_ret;
 	ECN_FBS_ID req;
+	mrb_value addr;
 
 	a_ret = _ecn_lcl_cre_req_fbs(svc, sender, ECN_LCL_MSG_GET_LCLADDR_REQ, &req);
 	if (a_ret != E_OK) {
@@ -627,7 +588,8 @@ ER ecn_lcl_get_lcladdr(ecnl_svc_task_t *svc, T_ECN_FBS_QUEUE *sender, int reques
 		return a_ret;
 	}
 
-	a_ret = _ecn_fbs_add_data_ex(mrb, req, &svc->enodadrb_table[enodid], sizeof(((ecn_lcl_msg_get_lcladdr_res_t *)0)->enodadrb));
+	addr = lcl_get_remote_addr(svc, enodid);
+	a_ret = _ecn_fbs_add_data_ex(mrb, req, &addr, sizeof(addr));
 	if (a_ret != E_OK) {
 		_ecn_fbs_del(mrb, req);
 		ECN_DBG_PUT_2("ecn_lcl_get_lcladdr() : _ecn_fbs_add_data_ex() result = %d:%s", a_ret, itron_strerror(a_ret));

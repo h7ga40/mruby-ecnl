@@ -99,7 +99,7 @@ typedef int_t			TMO;		/* タイムアウト指定 */
 
 typedef enum _echonet_enod_id
 {
-	ENOD_NOT_MATCH_ID	= -1,
+	ENOD_NOT_MATCH_ID	= -1,			/* アドレスID登録なし */
 	ENOD_MULTICAST_ID	= 0,			/* マルチキャストアドレスID */
 	ENOD_LOCAL_ID		= 1,			/* 自ノードアドレスID */
 	ENOD_API_ID			= 2,			/* APIアドレスID */
@@ -290,15 +290,6 @@ typedef struct echonet_object_control_block
 } EOBJCB;
 
 /*
- *  ECHONET Lite ノードと通信レイヤーアドレスの対応情報ブロックの定義
- */
-typedef struct echonet_node_address_block
-{
-	bool_t		inuse;			/* 使用状況 */
-	mrb_value	lcladdr;		/* 通信レイヤーアドレス */
-} ENODADRB;
-
-/*
  *  ECHONET Lite オブジェクト機能の初期化
  */
 extern void initialize_echonet_object(void);
@@ -306,8 +297,6 @@ extern void initialize_echonet_object(void);
 typedef EOBJINIB T_REOBJ;
 
 typedef EPRPINIB T_RPRP;
-
-typedef ENODADRB T_ENOD_ADDR;
 
 /*
  * ECHONET Liteサービス処理開始

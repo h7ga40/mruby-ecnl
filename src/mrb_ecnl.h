@@ -73,10 +73,13 @@ mrb_value mrb_ecnl_edata_new(mrb_state *mrb, T_EDATA *data);
 
 bool_t lcl_is_local_addr(ecnl_svc_task_t *svc, mrb_value ep);
 bool_t lcl_is_multicast_addr(ecnl_svc_task_t *svc, mrb_value ep);
-bool_t lcl_equals_addr(ecnl_svc_task_t *svc, mrb_value ep1, mrb_value ep2);
+bool_t lcl_is_valid_addrid(ecnl_svc_task_t *svc, ECN_ENOD_ID id);
 mrb_value lcl_get_local_addr(ecnl_svc_task_t *svc);
 mrb_value lcl_get_multicast_addr(ecnl_svc_task_t *svc);
-bool_t lcl_is_match(ecnl_svc_task_t *svc, struct ecn_node *enodcb, T_EDATA *edata, mrb_value ep);
+mrb_value lcl_get_remote_addr(ecnl_svc_task_t *svc, ECN_ENOD_ID id);
+ECN_ENOD_ID lcl_get_remote_id(ecnl_svc_task_t *svc, const mrb_value ep);
+ECN_ENOD_ID lcl_set_remote_addr(ecnl_svc_task_t *svc, T_EDATA *edata, mrb_value ep);
+ECN_ENOD_ID lcl_add_remote_addr(ecnl_svc_task_t *svc, T_EDATA *edata, mrb_value ep);
 ER lcl_snd_msg(ecnl_svc_task_t *svc, mrb_value ep, mrb_value msg);
 
 void mrb_mruby_ecnl_gem_init(mrb_state *mrb);

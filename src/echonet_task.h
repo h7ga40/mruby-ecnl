@@ -70,12 +70,11 @@ extern "C" {
 #define NUM_ECHONET_API_MAILBOX	10
 #endif /* NUM_ECHONET_API_MAILBOX */
 
-#define TNUM_ENODADR 100
-
 struct ecnl_svc_task {
 	mrb_state *mrb;
 	mrb_value self;
 	intptr_t exinf;
+	TMO api_timer;
 	/* アプリケーションが要求した電文のシーケンス番号 */
 	uint16_t api_tid;
 	/* 受信メッセージを開放するか否か */
@@ -92,10 +91,6 @@ struct ecnl_svc_task {
 	int tnum_enodid;
 	/* ECHONET Lite オブジェクト管理ブロックのエリア */
 	EOBJCB eobjcb_table[1];
-	/* ECHONET Liteノードと通信レイヤーアドレスの対応情報の数 */
-	int tnum_enodadr;
-	/* ECHONET Lite ノードと通信レイヤーアドレスの対応情報ブロックのエリア */
-	ENODADRB enodadrb_table[TNUM_ENODADR];
 	/* メールボックス */
 	T_ECN_FBS_QUEUE api_mbxid;
 	T_ECN_FBS_QUEUE svc_mbxid;

@@ -51,6 +51,7 @@
 #ifdef ECHONET_CONTROLLER_EXTENTION
 #include "echonet_agent.h"
 #endif
+#include "mrb_ecnl.h"
 
 #ifndef ECHONET_TASK_GET_TIMER
 #define ECHONET_TASK_GET_TIMER	TMO_FEVR
@@ -99,7 +100,7 @@ ER _ecn_tsk_snd_mbx(ecnl_svc_task_t *svc, ECN_FBS_ID fa_rsp_fbs, bool_t from_app
 				svc->api_tid = ((T_EDATA *)fa_rsp_fbs.ptr)->hdr.ecn_hdr.tid;
 
 			i = fa_rsp_fbs.ptr->hdr.target.id;
-			if (i < ENOD_REMOTE_ID || svc->tnum_enodadr <= i)
+			if (i < ENOD_REMOTE_ID || !lcl_is_valid_addrid(svc, i))
 				return E_NOEXS;
 			i += - ENOD_REMOTE_ID + 1;
 			if (from_app && (i < svc->tnum_enodid)) {
