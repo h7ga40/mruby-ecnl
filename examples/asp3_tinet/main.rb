@@ -239,8 +239,8 @@ class Controller < ECNL::SvcTask
 
 		super()
 
-		# 7segを"0"と表示
-		TargetBoard::set_led(0xC0)
+		# LEDをOFF
+		digitalWrite(2, 0)
 
 		set_timer(1000)
 	end
@@ -254,7 +254,8 @@ class Controller < ECNL::SvcTask
 		itr.itr_nxt()
 		until itr.is_eof do
 			if itr.epc == 0xD6 then
-				TargetBoard::set_led(0xF9)
+				# LEDをON
+				digitalWrite(2, 1)
 			end
 			itr.itr_nxt()
 		end
@@ -369,4 +370,25 @@ class Controller < ECNL::SvcTask
 end
 
 ctrl = Controller.new()
-TargetBoard::set(ctrl)
+
+while (true) do
+	ret = TargetBoard::wait_msg(ctrl.timer)
+	if !ret then
+		break;
+	end
+
+	ctrl.progress ret[0]
+
+	if ret.length == 2 then
+		case (ret[1])
+		when 1 then
+			TargetBoard::restart
+		when 2 then
+			ctrl.ntf_inl
+		end
+	elsif ret.length == 3 then
+		ctrl.recv_msg(ret[1], ret[2])
+	end
+
+	ctrl.call_timeout
+end

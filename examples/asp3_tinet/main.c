@@ -77,25 +77,21 @@ struct udp_msg {
 	uint8_t buffer[ETHER_MAX_LEN];
 };
 
+SYSTIM main_time;
+mrb_state *mrb;
+struct RClass *_module_target_board;
 static void netif_link_callback(T_IFNET *ether);
-static void main_initialize();
-static void main_finalize();
-static void main_ntf_inl();
-static TMO main_get_timer();
-static void main_progress(TMO interval);
-static void main_recieve_msg(struct udp_msg *msg);
-static void main_release_msg(struct udp_msg *msg);
-static void main_call_timeout();
+
+extern const uint8_t main_rb_code[];
 
 /*
  *  メインタスク
  */
 void main_task(intptr_t exinf)
 {
-	ER ret, ret2;
-	SYSTIM prev, now;
-	TMO timer;
-	struct udp_msg *msg;
+	ER ret;
+	struct RProc* n;
+	struct mrb_irep *irep;
 
 	/* MACアドレスを設定 */
 	ethernet_address(mac_addr);
@@ -103,65 +99,22 @@ void main_task(intptr_t exinf)
 	/* TINETが起動するまで待つ */
 	ether_set_link_callback(netif_link_callback);
 
-	/* 初期化 */
-	main_initialize();
+	/* mrubyの初期化 */
+	mrb = mrb_open();
+	if (mrb == NULL)
+		abort();
 
-	ret2 = get_tim(&now);
-	if (ret2 != E_OK){
+	ret = get_tim(&main_time);
+	if (ret != E_OK) {
 		syslog(LOG_ERROR, "get_tim");
 		return;
 	}
 
-	for(;;){
-		prev = now;
+	irep = mrb_read_irep(mrb, main_rb_code);
+	n = mrb_proc_new(mrb, irep);
+	mrb_run(mrb, n, mrb_nil_value());
 
-		/* タイマー取得 */
-		timer = main_get_timer();
-		if (timer != TMO_FEVR)
-			timer *= 1000;
-
-		/* メッセージ待ち */
-		ret = trcv_dtq(MAIN_DATAQUEUE, (intptr_t *)&msg, timer);
-		if ((ret != E_OK) && (ret != E_TMOUT)){
-			syslog(LOG_ERROR, "trcv_dtq");
-			break;
-		}
-
-		ret2 = get_tim(&now);
-		if (ret2 != E_OK){
-			syslog(LOG_ERROR, "get_tim");
-			break;
-		}
-
-		/* 時間経過 */
-		main_progress(now - prev);
-
-		/* Echonet電文受信の場合 */
-		if (ret == E_OK) {
-			if (msg->dst.ipaddr == 0){
-				/* Ethernet Link up */
-				if (msg->buffer[0] & IF_FLAG_LINK_UP) {
-					/* DHCP開始 */
-				}
-				else if (msg->buffer[0] & IF_FLAG_UP) {
-					/* 初期通知 */
-					main_ntf_inl();
-				}
-			}
-			else{
-				/* Echonet電文受信処理 */
-				main_recieve_msg(msg);
-
-				/* 領域解放 */
-				main_release_msg(msg);
-			}
-		}
-
-		/* タイムアウト処理 */
-		main_call_timeout();
-	}
-
-	main_finalize();
+	mrb_close(mrb);
 }
 
 ER callback_nblk_udp(ID cepid, FN fncd, void *p_parblk)
@@ -211,155 +164,81 @@ static void netif_link_callback(T_IFNET *ether) {
 	snd_dtq(MAIN_DATAQUEUE, (intptr_t)msg);
 }
 
-mrb_state *mrb;
-struct RClass *_module_sample;
-struct RClass *_class_main;
-mrb_value main_obj;
-void mrb_mruby_others_gem_init(mrb_state* mrb);
-void mrb_mruby_others_gem_final(mrb_state* mrb);
-
-extern const uint8_t main_rb_code[];
-
 /*
- * 初期化
+ * アプリケーションタスクの登録
  */
-static void main_initialize()
+static mrb_value mrb_target_board_wait_msg(mrb_state *mrb, mrb_value self)
 {
-	struct RProc* n;
-	struct mrb_irep *irep;
+	TMO timer;
+	SYSTIM now;
+	ER ret, ret2;
+	struct udp_msg *msg;
+	mrb_value arv[3];
 
-	/* mrubyの初期化 */
-	mrb = mrb_open();
-	if (mrb == NULL)
-		abort();
+	mrb_get_args(mrb, "i", &timer);
+	if (timer != TMO_FEVR)
+		timer *= 1000;
 
-	irep = mrb_read_irep(mrb, main_rb_code);
-	n = mrb_proc_new(mrb, irep);
-	mrb_run(mrb, n, mrb_nil_value());
-}
-
-static void main_finalize()
-{
-	mrb_close(mrb);
-}
-
-/* インスタンスリスト通知の送信 */
-static void main_ntf_inl()
-{
-	mrb_funcall(mrb, main_obj, "ntf_inl", 0);
-}
-
-/*
- * タイマー取得
- */
-static TMO main_get_timer()
-{
-	mrb_value result;
-
-	result = mrb_funcall(mrb, main_obj, "timer", 0);
-	if(mrb_fixnum_p(result))
-		return mrb_fixnum(result);
-
-	return TMO_FEVR;
-}
-
-/*
- * 時間経過
- */
-static void main_progress(TMO interval)
-{
-	mrb_funcall(mrb, main_obj, "progress", 1, mrb_fixnum_value(interval));
-}
-
-/*
- * Echonet電文受信処理
- */
-static void main_recieve_msg(struct udp_msg *msg)
-{
-	mrb_int maxlen, flags = 0;
-	mrb_value ep, buf;
-
-	/* 通信端点 */
-	ep = mrb_str_new(mrb, (char *)&msg->dst, sizeof(msg->dst));
-
-	/* 受信データ */
-	buf = mrb_str_new(mrb, (char *)msg->buffer, msg->len);
-
-	/* 通信レイヤーからの入力 */
-	mrb_funcall(mrb, main_obj, "recv_msg", 2, ep, buf);
-}
-
-/*
- * メッセージ破棄
- */
-static void main_release_msg(struct udp_msg *msg)
-{
-}
-
-static void main_call_timeout()
-{
-	mrb_funcall(mrb, main_obj, "call_timeout", 0);
-}
-
-static mrb_value mrb_sample_main_set(mrb_state *mrb, mrb_value self)
-{
-	mrb_get_args(mrb, "o", &main_obj);
-
-	return self;
-}
-
-static mrb_value mrb_sample_main_set_led(mrb_state *mrb, mrb_value self)
-{
-	mrb_value value;
-
-	mrb_get_args(mrb, "i", &value);
-
-	sil_wrb_mem((uint8_t *)0xFFFFF412, mrb_fixnum(value));
-
-	return self;
-}
-
-static mrb_value mrb_sample_main_get_led(mrb_state *mrb, mrb_value self)
-{
-	uint8_t value;
-
-	value = sil_reb_mem((uint8_t *)0xFFFFF412);
-
-	return mrb_fixnum_value(value);
-}
-
-static mrb_value mrb_sample_main_get_btn(mrb_state *mrb, mrb_value self)
-{
-	bool_t value;
-	mrb_value no;
-
-	mrb_get_args(mrb, "i", &no);
-
-	switch(mrb_fixnum(no)){
-	case 1:
-		value = (sil_reb_mem((uint8_t *)0xFFFFF413) & 0x01) != 0;
-		break;
-	case 2:
-		value = (sil_reb_mem((uint8_t *)0xFFFFF413) & 0x10) != 0;
-		break;
-	default:
-		value = false;
-		break;
+	/* メッセージ待ち */
+	ret = trcv_dtq(MAIN_DATAQUEUE, (intptr_t *)&msg, timer);
+	if ((ret != E_OK) && (ret != E_TMOUT)) {
+		syslog(LOG_ERROR, "trcv_dtq");
+		return mrb_nil_value();
 	}
 
-	return value ? mrb_true_value() : mrb_false_value();
+	ret2 = get_tim(&now);
+	if (ret2 != E_OK) {
+		syslog(LOG_ERROR, "get_tim");
+		return mrb_nil_value();
+	}
+
+	arv[0] = mrb_fixnum_value(now - main_time);
+	main_time = now;
+
+	/* タイムアウトの場合 */
+	if (ret == E_TMOUT) {
+		return mrb_ary_new_from_values(mrb, 1, arv);
+	}
+
+	/* 内部イベントの場合 */
+	if (msg->dst.ipaddr == 0) {
+		/* Ethernet Link up */
+		if (msg->buffer[0] & IF_FLAG_LINK_UP) {
+			arv[1] = mrb_fixnum_value(1);
+		}
+		/* EP Link up */
+		else if (msg->buffer[0] & IF_FLAG_UP) {
+			arv[1] = mrb_fixnum_value(2);
+		}
+
+		return mrb_ary_new_from_values(mrb, 2, arv);
+	}
+	/* Echonet電文受信の場合 */
+	else {
+		/* 通信端点 */
+		arv[1] = mrb_str_new(mrb, (char *)&msg->dst, sizeof(msg->dst));
+
+		/* 受信データ */
+		arv[2] = mrb_str_new(mrb, (char *)msg->buffer, msg->len);
+
+		return mrb_ary_new_from_values(mrb, 3, arv);
+	}
 }
 
-static mrb_value mrb_sample_main_get_dsw(mrb_state *mrb, mrb_value self)
+/*
+ * アプリケーションタスクの登録
+ */
+static mrb_value mrb_target_board_restart(mrb_state *mrb, mrb_value self)
 {
-	uint8_t value;
+	/* DHCP開始 */
 
-	value = (sil_reb_mem((uint8_t *)0xFFFFF40F) & 0x01) != 0;
-
-	return mrb_fixnum_value(value);
+	return self;
 }
 
-static mrb_value mrb_sample_main_snd_msg(mrb_state *mrb, mrb_value self)
+/*
+ * 通信レイヤーへの送信
+ */
+static mrb_value mrb_target_board_snd_msg(mrb_state *mrb, mrb_value self)
 {
 	mrb_value rep;
 	mrb_value rdat;
@@ -384,7 +263,10 @@ static mrb_value mrb_sample_main_snd_msg(mrb_state *mrb, mrb_value self)
 	return mrb_nil_value();
 }
 
-static mrb_value mrb_sample_main_is_local_addr(mrb_state *mrb, mrb_value self)
+/*
+ * ローカルアドレスか確認
+ */
+static mrb_value mrb_target_board_is_local_addr(mrb_state *mrb, mrb_value self)
 {
 	mrb_value rep;
 	T_IPV4EP *ep;
@@ -401,7 +283,10 @@ static mrb_value mrb_sample_main_is_local_addr(mrb_state *mrb, mrb_value self)
 	return (ep->ipaddr == MAKE_IPV4_ADDR(127, 0, 0, 1)) ? mrb_true_value() : mrb_false_value();
 }
 
-static mrb_value mrb_sample_main_is_multicast_addr(mrb_state *mrb, mrb_value self)
+/*
+ * マルチキャストアドレスか確認
+ */
+static mrb_value mrb_target_board_is_multicast_addr(mrb_state *mrb, mrb_value self)
 {
 	mrb_value rep;
 	T_IPV4EP *ep;
@@ -418,7 +303,10 @@ static mrb_value mrb_sample_main_is_multicast_addr(mrb_state *mrb, mrb_value sel
 	return (ep->ipaddr == MAKE_IPV4_ADDR(224, 0, 23, 0)) ? mrb_true_value() : mrb_false_value();
 }
 
-static mrb_value mrb_sample_main_equals_addr(mrb_state *mrb, mrb_value self)
+/*
+ * 同一アドレスか確認
+ */
+static mrb_value mrb_target_board_equals_addr(mrb_state *mrb, mrb_value self)
 {
 	mrb_value rep1, rep2;
 	T_IPV4EP *ep1, *ep2;
@@ -436,7 +324,10 @@ static mrb_value mrb_sample_main_equals_addr(mrb_state *mrb, mrb_value self)
 	return (ep1->ipaddr == ep2->ipaddr) ? mrb_true_value() : mrb_false_value();
 }
 
-static mrb_value mrb_sample_main_get_local_addr(mrb_state *mrb, mrb_value self)
+/*
+ * ローカルアドレスの取得
+ */
+static mrb_value mrb_target_board_get_local_addr(mrb_state *mrb, mrb_value self)
 {
 	T_IPV4EP ep;
 	mrb_value rep;
@@ -449,7 +340,10 @@ static mrb_value mrb_sample_main_get_local_addr(mrb_state *mrb, mrb_value self)
 	return rep;
 }
 
-static mrb_value mrb_sample_main_get_multicast_addr(mrb_state *mrb, mrb_value self)
+/*
+ * マルチキャストアドレスの取得
+ */
+static mrb_value mrb_target_board_get_multicast_addr(mrb_state *mrb, mrb_value self)
 {
 	T_IPV4EP ep;
 	mrb_value rep;
@@ -464,19 +358,16 @@ static mrb_value mrb_sample_main_get_multicast_addr(mrb_state *mrb, mrb_value se
 
 void mrb_mruby_others_gem_init(mrb_state* mrb)
 {
-	_module_sample = mrb_define_module(mrb, "TargetBoard");
+	_module_target_board = mrb_define_module(mrb, "TargetBoard");
 
-	mrb_define_class_method(mrb, _module_sample, "set", mrb_sample_main_set, MRB_ARGS_REQ(1));
-	mrb_define_class_method(mrb, _module_sample, "set_led", mrb_sample_main_set_led, MRB_ARGS_REQ(1));
-	mrb_define_class_method(mrb, _module_sample, "get_led", mrb_sample_main_get_led, MRB_ARGS_NONE());
-	mrb_define_class_method(mrb, _module_sample, "get_btn", mrb_sample_main_get_btn, MRB_ARGS_REQ(1));
-	mrb_define_class_method(mrb, _module_sample, "get_dsw", mrb_sample_main_get_dsw, MRB_ARGS_NONE());
-	mrb_define_class_method(mrb, _module_sample, "snd_msg", mrb_sample_main_snd_msg, MRB_ARGS_REQ(2));
-	mrb_define_class_method(mrb, _module_sample, "is_local_addr", mrb_sample_main_is_local_addr, MRB_ARGS_REQ(1));
-	mrb_define_class_method(mrb, _module_sample, "is_multicast_addr", mrb_sample_main_is_multicast_addr, MRB_ARGS_REQ(1));
-	mrb_define_class_method(mrb, _module_sample, "equals_addr", mrb_sample_main_equals_addr, MRB_ARGS_REQ(2));
-	mrb_define_class_method(mrb, _module_sample, "get_local_addr", mrb_sample_main_get_local_addr, MRB_ARGS_NONE());
-	mrb_define_class_method(mrb, _module_sample, "get_multicast_addr", mrb_sample_main_get_multicast_addr, MRB_ARGS_NONE());
+	mrb_define_class_method(mrb, _module_target_board, "wait_msg", mrb_target_board_wait_msg, MRB_ARGS_REQ(1));
+	mrb_define_class_method(mrb, _module_target_board, "restart", mrb_target_board_restart, MRB_ARGS_NONE());
+	mrb_define_class_method(mrb, _module_target_board, "snd_msg", mrb_target_board_snd_msg, MRB_ARGS_REQ(2));
+	mrb_define_class_method(mrb, _module_target_board, "is_local_addr", mrb_target_board_is_local_addr, MRB_ARGS_REQ(1));
+	mrb_define_class_method(mrb, _module_target_board, "is_multicast_addr", mrb_target_board_is_multicast_addr, MRB_ARGS_REQ(1));
+	mrb_define_class_method(mrb, _module_target_board, "equals_addr", mrb_target_board_equals_addr, MRB_ARGS_REQ(2));
+	mrb_define_class_method(mrb, _module_target_board, "get_local_addr", mrb_target_board_get_local_addr, MRB_ARGS_NONE());
+	mrb_define_class_method(mrb, _module_target_board, "get_multicast_addr", mrb_target_board_get_multicast_addr, MRB_ARGS_NONE());
 }
 
 void mrb_mruby_others_gem_final(mrb_state* mrb)
