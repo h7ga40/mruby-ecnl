@@ -622,7 +622,6 @@ static ER ecn_agent_proc_get_device_info(ecnl_svc_task_t *svc, ecn_agent_t *agen
 }
 
 TMO ecn_agent_get_timer(ecnl_svc_task_t *svc)
-
 {
 	TMO timer = TMO_FEVR, temp;
 	ecn_agent_t *agent = &svc->agent;

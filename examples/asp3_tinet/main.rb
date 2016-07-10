@@ -1,40 +1,40 @@
 # TOPPERSプロジェクト
-$MAKER_CODE = 0x00.chr + 0x00.chr + 0xB3.chr
+$MAKER_CODE = "\x00\x00\xB3"
 
 # ノードプロファイルオブジェクト
 class LocalNode < ECNL::ENode
 	def initialize(eojx3)
 		# 動作状態
-		@operation_status = 0x30.chr
+		@operation_status = "\x30"
 		# Ｖｅｒｓｉｏｎ情報
-		@version_information = 0x01.chr + 0x0A.chr + 0x01.chr + 0x00.chr
+		@version_information = "\x01\x0A\x01\x00"
 		# 識別番号
 		@identification_number = 
 			# 下位通信層IDフィールド
-			0xFE.chr +
+			"\xFE" +
 			# メーカーコード
 			$MAKER_CODE +
 			# ユニークID部(メーカー独自)
-			0x00.chr + 0x00.chr + 0x00.chr + 0x00.chr + 0x00.chr + 0x00.chr + 0x00.chr + 0x00.chr + 0x00.chr + 0x00.chr + 0x00.chr + 0x00.chr + 0x00.chr
+			"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 		# 異常内容
-		@fault_content = 0x00.chr + 0x00.chr
+		@fault_content = "\x00\x00"
 		# メーカーコード
 		@manufacturer_code = $MAKER_CODE
 
 		# インスタンス数
-		@inst_count = 0x0.chr + 0x0.chr + 0x1.chr
+		@inst_count = "\x00\x00\x01"
 		# クラス数
-		@class_count = 0x0.chr + 0x2.chr
+		@class_count = "\x00\x02"
 		# インスタンスリスト
-		@inst_list = 0x1.chr + 0x5.chr + 0xff.chr + 0x1.chr
+		@inst_list = "\x01\x05\xff\x01"
 		# クラスリスト
-		@class_list = 0x1.chr + 0x5.chr + 0xff.chr
+		@class_list = "\x01\x05\xff"
 		# アナウンスプロパティマップ
-		@anno_prpmap = 0x1.chr + 0xd5.chr
+		@anno_prpmap = "\x01\xd5"
 		# SETプロパティマップ
-		@set_prpmap = 0x1.chr + 0x80.chr
+		@set_prpmap = "\x01\x80"
 		# GETプロパティマップ
-		@get_prpmap = 0xc.chr + 0x80.chr + 0x82.chr + 0x83.chr + 0x89.chr + 0x8a.chr + 0x9d.chr + 0x9e.chr + 0x9f.chr + 0xd3.chr + 0xd4.chr + 0xd6.chr + 0xd7.chr
+		@get_prpmap = "\x0c\x80\x82\x83\x89\x8a\x9d\x9e\x9f\xd3\xd4\xd6\xd7"
 		# プロパティ定義
 		eprpinib_table = [
 			ECNL::EProperty.new(0x80, (ECNL::EPC_RULE_SET | ECNL::EPC_RULE_GET), @operation_status.length, :@operation_status, :onoff_prop_set, :data_prop_get),
@@ -89,22 +89,22 @@ end
 class ControllerObj < ECNL::EObject
 	def initialize(eojx3, enod)
 		# 動作状態
-		@operation_status = 0x30.chr
+		@operation_status = "\x30"
 		# 設置場所
-		@installation_location = 0x01.chr + 0x0A.chr + 0x01.chr + 0x00.chr
+		@installation_location = "\x01\x0A\x01\x00"
 		# 規格Ｖｅｒｓｉｏｎ情報
-		@standard_version_information = 0x00.chr + 0x00.chr + 'C'.chr + 0x00.chr
+		@standard_version_information = "\x00\x00C\x00"
 		# 異常発生状態
-		@fault_status = 0x41.chr
+		@fault_status = "\x41"
 		# メーカーコード
 		@manufacturer_code = $MAKER_CODE
 
 		# アナウンスプロパティマップ
-		@anno_prpmap = 0x3.chr + 0x80.chr + 0x81.chr + 0x88.chr
+		@anno_prpmap = "\x03\x80\x81\x88"
 		# SETプロパティマップ
-		@set_prpmap = 0x4.chr + 0x80.chr + 0x81.chr + 0x97.chr + 0x98.chr
+		@set_prpmap = "\x04\x80\x81\x97\x98"
 		# GETプロパティマップ
-		@get_prpmap = 0xa.chr + 0x80.chr + 0x81.chr + 0x82.chr + 0x88.chr + 0x8a.chr + 0x97.chr + 0x98.chr + 0x9d.chr + 0x9e.chr + 0x9f.chr
+		@get_prpmap = "\x0a\x80\x81\x82\x88\x8a\x97\x98\x9d\x9e\x9f"
 		# プロパティ定義
 		eprpinib_table = [
 			ECNL::EProperty.new(0x80, (ECNL::EPC_RULE_SET | ECNL::EPC_RULE_GET | ECNL::EPC_ANNOUNCE), @operation_status.length, :@operation_status, :onoff_prop_set, :data_prop_get),
@@ -371,24 +371,32 @@ end
 
 ctrl = Controller.new()
 
+# メインループ
 while (true) do
+	# メッセージ待ち
 	ret = TargetBoard::wait_msg(ctrl.timer)
 	if !ret then
 		break;
 	end
 
+	# 経過時間の計算
 	ctrl.progress ret[0]
 
+	# 戻り値が２つなら
 	if ret.length == 2 then
+		# 内部イベント
 		case (ret[1])
 		when 1 then
 			TargetBoard::restart
 		when 2 then
 			ctrl.ntf_inl
 		end
+	# 戻り値が３つなら
 	elsif ret.length == 3 then
+		# 通信レイヤーからのメッセージ（通信端点と電文）
 		ctrl.recv_msg(ret[1], ret[2])
 	end
 
+	# タイムアウトの処理があれば行う
 	ctrl.call_timeout
 end

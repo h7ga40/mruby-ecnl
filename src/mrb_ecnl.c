@@ -95,7 +95,7 @@ static mrb_value mrb_ecnl_eobject_initialize(mrb_state *mrb, mrb_value self)
 	rprop = RARRAY_PTR(props);
 	count = RARRAY_LEN(props);
 
-	obj = (ecn_device_t *)mrb_malloc(mrb, sizeof(ecn_device_t) + count * sizeof(EPRPINIB **));
+	obj = (ecn_device_t *)mrb_malloc(mrb, sizeof(ecn_device_t) + count * sizeof(EPRPINIB *));
 	DATA_TYPE(self) = &mrb_ecnl_eobject_type;
 	DATA_PTR(self) = obj;
 
@@ -185,6 +185,10 @@ static mrb_value mrb_ecnl_eobject_data_prop_get(mrb_state *mrb, mrb_value self)
 	size = mrb_fixnum(rsiz);
 
 	rdat = mrb_iv_get(mrb, self, prop->exinf);
+	if (RSTRING_LEN(rdat) != size) {
+		mrb_raise(mrb, E_RUNTIME_ERROR, "data_prop_get");
+		return mrb_nil_value();
+	}
 
 	return rdat;
 }
@@ -203,7 +207,7 @@ static mrb_value mrb_ecnl_enode_initialize(mrb_state *mrb, mrb_value self)
 	rprop = RARRAY_PTR(props);
 	count = RARRAY_LEN(props);
 
-	nod = (ecn_node_t *)mrb_malloc(mrb, sizeof(ecn_node_t) + count * sizeof(EPRPINIB **));
+	nod = (ecn_node_t *)mrb_malloc(mrb, sizeof(ecn_node_t) + count * sizeof(EPRPINIB *));
 	DATA_TYPE(self) = &mrb_ecnl_enode_type;
 	DATA_PTR(self) = nod;
 

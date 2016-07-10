@@ -430,6 +430,7 @@ ER _ecn_tsk_mk_esv(ecnl_svc_task_t *svc, ECN_FBS_ID *fp_fbs_id, ID fa_seoj, ID f
 	else
 		a_fbs_id.ptr->hdr.reply.id = ENOD_API_ID;
 
+	((T_EDATA *)a_fbs_id.ptr)->trn_pos = -1;
 	/* 正常終了 */
 	*fp_fbs_id = a_fbs_id;
 	return E_OK;
