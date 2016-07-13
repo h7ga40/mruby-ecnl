@@ -240,7 +240,9 @@ class Controller < ECNL::SvcTask
 		super()
 
 		# LEDをOFF
-		digitalWrite(2, 0)
+		pinMode(TargetBoard::LED_USER, 1)
+		digitalWrite(TargetBoard::LED_USER, 0)
+		digitalWrite(TargetBoard::LED_BLUE, 0)
 
 		set_timer(1000)
 	end
@@ -255,7 +257,7 @@ class Controller < ECNL::SvcTask
 		until itr.is_eof do
 			if itr.epc == 0xD6 then
 				# LEDをON
-				digitalWrite(2, 1)
+				digitalWrite(TargetBoard::LED_USER, 1)
 			end
 			itr.itr_nxt()
 		end

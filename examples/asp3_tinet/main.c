@@ -42,6 +42,7 @@
 #include <t_syslog.h>
 #include <t_stdlib.h>
 #include <sil.h>
+#include <stdlib.h>
 #include <string.h>
 #include "syssvc/serial.h"
 #include "syssvc/syslog.h"
@@ -68,6 +69,7 @@
 #include <net/if_var.h>
 #include <netinet/udp_var.h>
 #include <ethernet_api.h>
+#include "mruby_arduino.h"
 
 uint8_t mac_addr[6] = { 0x00, 0x30, 0x13, 0x06, 0x62, 0xC0 };
 
@@ -84,6 +86,11 @@ static void netif_link_callback(T_IFNET *ether);
 
 extern const uint8_t main_rb_code[];
 
+/* MACアドレスの設定時に呼ばれる */
+void mbed_mac_address(char *mac) {
+	memcpy(mac, mac_addr, 6);
+}
+
 /*
  *  メインタスク
  */
@@ -93,8 +100,8 @@ void main_task(intptr_t exinf)
 	struct RProc* n;
 	struct mrb_irep *irep;
 
-	/* MACアドレスを設定 */
-	ethernet_address(mac_addr);
+	/* mruby_arduino初期化 */
+	mruby_arduino_init();
 
 	/* TINETが起動するまで待つ */
 	ether_set_link_callback(netif_link_callback);
@@ -192,7 +199,7 @@ static mrb_value mrb_target_board_wait_msg(mrb_state *mrb, mrb_value self)
 		return mrb_nil_value();
 	}
 
-	arv[0] = mrb_fixnum_value(now - main_time);
+	arv[0] = mrb_fixnum_value((now - main_time) / 1000);
 	main_time = now;
 
 	/* タイムアウトの場合 */
@@ -209,6 +216,9 @@ static mrb_value mrb_target_board_wait_msg(mrb_state *mrb, mrb_value self)
 		/* EP Link up */
 		else if (msg->buffer[0] & IF_FLAG_UP) {
 			arv[1] = mrb_fixnum_value(2);
+		}
+		else {
+			arv[1] = mrb_fixnum_value(0);
 		}
 
 		return mrb_ary_new_from_values(mrb, 2, arv);
@@ -254,7 +264,7 @@ static mrb_value mrb_target_board_snd_msg(mrb_state *mrb, mrb_value self)
 
 	ep = (T_IPV4EP *)RSTRING_PTR(rep);
 
-	ret = udp_snd_dat(MAIN_ECNL_UDP_CEPID, ep, RSTRING_PTR(rdat), RSTRING_LEN(rdat), 1000);
+	ret = udp_snd_dat(MAIN_ECNL_UDP_CEPID, ep, RSTRING_PTR(rdat), RSTRING_LEN(rdat), TMO_FEVR);
 	if (ret < 0) {
 		mrb_raise(mrb, E_RUNTIME_ERROR, "snd_msg");
 		return mrb_nil_value();
@@ -359,6 +369,53 @@ static mrb_value mrb_target_board_get_multicast_addr(mrb_state *mrb, mrb_value s
 void mrb_mruby_others_gem_init(mrb_state* mrb)
 {
 	_module_target_board = mrb_define_module(mrb, "TargetBoard");
+
+	// mbed Pin Names
+	mrb_define_const(mrb, _module_target_board, "LED1", mrb_fixnum_value(LED1));
+	mrb_define_const(mrb, _module_target_board, "LED2", mrb_fixnum_value(LED2));
+	mrb_define_const(mrb, _module_target_board, "LED3", mrb_fixnum_value(LED3));
+	mrb_define_const(mrb, _module_target_board, "LED4", mrb_fixnum_value(LED4));
+
+	mrb_define_const(mrb, _module_target_board, "LED_RED", mrb_fixnum_value(LED_RED));
+	mrb_define_const(mrb, _module_target_board, "LED_GREEN", mrb_fixnum_value(LED_GREEN));
+	mrb_define_const(mrb, _module_target_board, "LED_BLUE", mrb_fixnum_value(LED_BLUE));
+	mrb_define_const(mrb, _module_target_board, "LED_USER", mrb_fixnum_value(LED_USER));
+
+	mrb_define_const(mrb, _module_target_board, "USBTX", mrb_fixnum_value(USBTX));
+	mrb_define_const(mrb, _module_target_board, "USBRX", mrb_fixnum_value(USBRX));
+
+	// Arduiono Pin Names
+	mrb_define_const(mrb, _module_target_board, "D0", mrb_fixnum_value(D0));
+	mrb_define_const(mrb, _module_target_board, "D1", mrb_fixnum_value(D1));
+	mrb_define_const(mrb, _module_target_board, "D2", mrb_fixnum_value(D2));
+	mrb_define_const(mrb, _module_target_board, "D3", mrb_fixnum_value(D3));
+	mrb_define_const(mrb, _module_target_board, "D4", mrb_fixnum_value(D4));
+	mrb_define_const(mrb, _module_target_board, "D5", mrb_fixnum_value(D5));
+	mrb_define_const(mrb, _module_target_board, "D6", mrb_fixnum_value(D6));
+	mrb_define_const(mrb, _module_target_board, "D7", mrb_fixnum_value(D7));
+	mrb_define_const(mrb, _module_target_board, "D8", mrb_fixnum_value(D8));
+	mrb_define_const(mrb, _module_target_board, "D9", mrb_fixnum_value(D9));
+	mrb_define_const(mrb, _module_target_board, "D10", mrb_fixnum_value(D10));
+	mrb_define_const(mrb, _module_target_board, "D11", mrb_fixnum_value(D11));
+	mrb_define_const(mrb, _module_target_board, "D12", mrb_fixnum_value(D12));
+	mrb_define_const(mrb, _module_target_board, "D13", mrb_fixnum_value(D13));
+	mrb_define_const(mrb, _module_target_board, "D14", mrb_fixnum_value(D14));
+	mrb_define_const(mrb, _module_target_board, "D15", mrb_fixnum_value(D15));
+
+	mrb_define_const(mrb, _module_target_board, "A0", mrb_fixnum_value(A0));
+	mrb_define_const(mrb, _module_target_board, "A1", mrb_fixnum_value(A1));
+	mrb_define_const(mrb, _module_target_board, "A2", mrb_fixnum_value(A2));
+	mrb_define_const(mrb, _module_target_board, "A3", mrb_fixnum_value(A3));
+	mrb_define_const(mrb, _module_target_board, "A4", mrb_fixnum_value(A4));
+	mrb_define_const(mrb, _module_target_board, "A5", mrb_fixnum_value(A5));
+
+	mrb_define_const(mrb, _module_target_board, "I2C_SCL", mrb_fixnum_value(I2C_SCL));
+	mrb_define_const(mrb, _module_target_board, "I2C_SDA", mrb_fixnum_value(I2C_SDA));
+
+	mrb_define_const(mrb, _module_target_board, "USER_BUTTON0", mrb_fixnum_value(USER_BUTTON0));
+
+	// Not connected
+	mrb_define_const(mrb, _module_target_board, "NC", mrb_fixnum_value(NC));
 
 	mrb_define_class_method(mrb, _module_target_board, "wait_msg", mrb_target_board_wait_msg, MRB_ARGS_REQ(1));
 	mrb_define_class_method(mrb, _module_target_board, "restart", mrb_target_board_restart, MRB_ARGS_NONE());
