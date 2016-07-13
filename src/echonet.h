@@ -208,10 +208,11 @@ typedef struct
  */
 typedef struct echonet_object_data
 {
-	uint8_t _private1[192 - sizeof(int)];
+	uint8_t _private1[64 - sizeof(int)];
 	int trn_pos;
+	uint8_t _private2[128];
 	T_ECN_EDT_HDR hdr;
-	uint8_t _private2[64 - sizeof(T_ECN_EDT_HDR)];
+	uint8_t _private3[64 - sizeof(T_ECN_EDT_HDR)];
 } __attribute__((packed)) T_EDATA;
 
 #ifdef __CA850__

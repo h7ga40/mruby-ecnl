@@ -108,6 +108,8 @@ static mrb_value mrb_ecnl_eobject_initialize(mrb_state *mrb, mrb_value self)
 	obj->base.inib.eojx2 = eojx2;
 	obj->base.inib.eojx3 = eojx3;
 	obj->base.inib.eprp = eprp;
+	obj->base.inib.eprpcnt = count;
+	obj->base.eprpcnt = count;
 
 	obj->node = (ecn_node_t *)DATA_PTR(node);
 
