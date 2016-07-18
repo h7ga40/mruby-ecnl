@@ -1272,12 +1272,12 @@ void echonet_apptask_recv_msg(ecnl_svc_task_t *svc, T_ECN_FST_BLK *p_msg)
 		/* Echonet電文受信処理 */
 		main_recv_esv(svc, (T_EDATA *)p_msg);
 
-		/* 領域解放 */
+		/* 領域解放はGCに任せる
 		ret = ecn_rel_esv(mrb, (T_EDATA *)p_msg);
 		if (ret != E_OK) {
 			mrb_raise(mrb, E_RUNTIME_ERROR, "ecn_rel_esv");
 			return;
-		}
+		} */
 	}
 	/* 応答電文待ちの割り込みの場合 */
 	else if ((p_msg)->hdr.type == ECN_MSG_INTERNAL) {
