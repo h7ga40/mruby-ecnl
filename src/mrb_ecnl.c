@@ -66,12 +66,32 @@ static void mrb_ecnl_edata_free(mrb_state *mrb, void *ptr);
 static void mrb_ecnl_eiterator_free(mrb_state *mrb, void *ptr);
 static void mrb_ecnl_svctask_free(mrb_state *mrb, void *ptr);
 
-const static struct mrb_data_type mrb_ecnl_eobject_type = {"EObject", mrb_ecnl_eobject_free};
-const static struct mrb_data_type mrb_ecnl_enode_type = {"ENode", mrb_ecnl_enode_free};
-const static struct mrb_data_type mrb_ecnl_eproperty_type = {"EProperty", mrb_ecnl_eproperty_free};
-const static struct mrb_data_type mrb_ecnl_edata_type = {"EData", mrb_ecnl_edata_free};
-const static struct mrb_data_type mrb_ecnl_eiterator_type = {"EIterator", mrb_ecnl_eiterator_free};
-const static struct mrb_data_type mrb_ecnl_svctask_type = {"SvcTask", mrb_ecnl_svctask_free};
+const static struct mrb_data_type mrb_ecnl_eobject_type = { "EObject", mrb_ecnl_eobject_free };
+const static struct mrb_data_type mrb_ecnl_enode_type = { "ENode", mrb_ecnl_enode_free };
+const static struct mrb_data_type mrb_ecnl_eproperty_type = { "EProperty", mrb_ecnl_eproperty_free };
+const static struct mrb_data_type mrb_ecnl_edata_type = { "EData", mrb_ecnl_edata_free };
+const static struct mrb_data_type mrb_ecnl_eiterator_type = { "EIterator", mrb_ecnl_eiterator_free };
+const static struct mrb_data_type mrb_ecnl_svctask_type = { "SvcTask", mrb_ecnl_svctask_free };
+
+static int anno_prpmap_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size);
+static int set_prpmap_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size);
+static int get_prpmap_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size);
+static int inst_count_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size);
+static int class_count_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size);
+static int inst_list_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size);
+static int inst_lists_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size);
+static int class_lists_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size);
+
+const static EPRPINIB auto_eproperties[] = {
+	{0x9D, EPC_RULE_GET, 255, 0, NULL, anno_prpmap_prop_get},
+	{0x9E, EPC_RULE_GET, 255, 0, NULL, set_prpmap_prop_get},
+	{0x9F, EPC_RULE_GET, 255, 0, NULL, get_prpmap_prop_get},
+	{0xD3, EPC_RULE_GET, 255, 0, NULL, inst_count_prop_get},
+	{0xD4, EPC_RULE_GET, 255, 0, NULL, class_count_prop_get},
+	{0xD5, EPC_RULE_ANNO, 255, 0, NULL, inst_list_prop_get},
+	{0xD6, EPC_RULE_GET, 255, 0, NULL, inst_lists_prop_get},
+	{0xD7, EPC_RULE_GET, 255, 0, NULL, class_lists_prop_get},
+};
 
 static mrb_value mrb_ecnl_eobject_initialize(mrb_state *mrb, mrb_value self)
 {
@@ -83,7 +103,8 @@ static mrb_value mrb_ecnl_eobject_initialize(mrb_state *mrb, mrb_value self)
 	mrb_value props;
 	const mrb_value *rprop;
 	const EPRPINIB **eprp;
-	int i, count;
+	EPRPINIB *aprops;
+	int i, count, icnt;
 
 	mrb_get_args(mrb, "iiioA", &eojx1, &eojx2, &eojx3, &node, &props);
 
@@ -93,13 +114,34 @@ static mrb_value mrb_ecnl_eobject_initialize(mrb_state *mrb, mrb_value self)
 	}
 
 	rprop = RARRAY_PTR(props);
-	count = RARRAY_LEN(props);
+	icnt = RARRAY_LEN(props);
+	count = icnt + 3; /* プロパティマップ分 */
 
-	obj = (ecn_device_t *)mrb_malloc(mrb, sizeof(ecn_device_t) + count * sizeof(EPRPINIB *));
+	for (i = 0; i < icnt; i++) {
+		T_MRB_ECNL_EPROPERTY *prop;
+
+		if (!mrb_obj_is_kind_of(mrb, rprop[i], _class_property)) {
+			mrb_raise(mrb, E_RUNTIME_ERROR, "eprpinib_table");
+			return mrb_nil_value();
+		}
+
+		prop = (T_MRB_ECNL_EPROPERTY *)DATA_PTR(rprop[i]);
+
+		/* プロパティマップの場合は減算 */
+		switch (prop->inib.eprpcd) {
+		case 0x9D: case 0x9E: case 0x9F:
+			count--;
+			break;
+		}
+	}
+
+	obj = (ecn_device_t *)mrb_calloc(mrb, 1, sizeof(ecn_device_t) + count * sizeof(EPRPINIB *)
+		+ (sizeof(EPRPINIB) * 3));
 	DATA_TYPE(self) = &mrb_ecnl_eobject_type;
 	DATA_PTR(self) = obj;
 
 	eprp = (const EPRPINIB **)&obj[1];
+	aprops = (EPRPINIB *)&eprp[count];
 
 	obj->base.inib.eobjatr = EOBJ_DEVICE;
 	obj->base.inib.enodid = 0;
@@ -113,24 +155,28 @@ static mrb_value mrb_ecnl_eobject_initialize(mrb_state *mrb, mrb_value self)
 
 	obj->node = (ecn_node_t *)DATA_PTR(node);
 
-	for (i = 0; i < count; i++) {
+	for (i = 0; i < icnt; i++) {
 		T_MRB_ECNL_EPROPERTY *prop;
-
-		if (!mrb_obj_is_kind_of(mrb, rprop[i], _class_property)) {
-			mrb_raise(mrb, E_RUNTIME_ERROR, "eprpinib_table");
-			goto error;
-		}
-
 		prop = (T_MRB_ECNL_EPROPERTY *)DATA_PTR(rprop[i]);
+
+		/* プロパティマップの場合は無視 */
+		switch (prop->inib.eprpcd) {
+		case 0x9D: case 0x9E: case 0x9F:
+			continue;
+		}
 
 		prop->eobj = self;
 		eprp[i] = &prop->inib;
 	}
 
-	return self;
-error:
-	self = mrb_nil_value();
-	mrb_free(mrb, obj);
+	for (int j = 0; j < 3; i++, j++) {
+		EPRPINIB *prop = &aprops[j];
+
+		memcpy(prop, &auto_eproperties[j], sizeof(*prop));
+
+		prop->exinf = (intptr_t)obj;
+		eprp[i] = prop;
+	}
 
 	return self;
 }
@@ -140,7 +186,7 @@ static void mrb_ecnl_eobject_free(mrb_state *mrb, void *ptr)
 	ecn_device_t *obj = (ecn_device_t *)ptr;
 
 	/* 機器オブジェクトの設定として取り込まれた場合は破棄しない */
-	if(obj->base.svc == NULL)
+	if (obj->base.svc == NULL)
 		mrb_free(mrb, obj);
 }
 
@@ -201,33 +247,42 @@ static mrb_value mrb_ecnl_enode_initialize(mrb_state *mrb, mrb_value self)
 	mrb_int eojx3;
 	mrb_value props;
 	const mrb_value *rprop;
-	int i, count;
+	int i, count, icnt;
 	const EPRPINIB **eprp;
+	EPRPINIB *aprops;
 
 	mrb_get_args(mrb, "iA", &eojx3, &props);
 
 	rprop = RARRAY_PTR(props);
-	count = RARRAY_LEN(props);
+	icnt = RARRAY_LEN(props);
+	count = icnt + 8; /* インスタンスリストなどの分 */
 
-	nod = (ecn_node_t *)mrb_malloc(mrb, sizeof(ecn_node_t) + count * sizeof(EPRPINIB *));
-	DATA_TYPE(self) = &mrb_ecnl_enode_type;
-	DATA_PTR(self) = nod;
-
-	eprp = (const EPRPINIB **)&nod[1];
-
-	for (i = 0; i < count; i++) {
+	for (i = 0; i < icnt; i++) {
 		T_MRB_ECNL_EPROPERTY *prop;
 
 		if (!mrb_obj_is_kind_of(mrb, rprop[i], _class_property)) {
 			mrb_raise(mrb, E_RUNTIME_ERROR, "eprpinib_table");
-			goto error;
+			return mrb_nil_value();
 		}
 
 		prop = (T_MRB_ECNL_EPROPERTY *)DATA_PTR(rprop[i]);
 
-		prop->eobj = self;
-		eprp[i] = &prop->inib;
+		/* インスタンスリストなどの場合は減算 */
+		switch (prop->inib.eprpcd) {
+		case 0xD3: case 0xD4: case 0xD5: case 0xD6: case 0xD7:
+		case 0x9D: case 0x9E: case 0x9F:
+			count--;
+			break;
+		}
 	}
+
+	nod = (ecn_node_t *)mrb_calloc(mrb, 1, sizeof(ecn_node_t) + count * sizeof(EPRPINIB *)
+		+ (sizeof(EPRPINIB) * 8)/* インスタンスリストなどの分 */);
+	DATA_TYPE(self) = &mrb_ecnl_enode_type;
+	DATA_PTR(self) = nod;
+
+	eprp = (const EPRPINIB **)&nod[1];
+	aprops = (EPRPINIB *)&eprp[count];
 
 	nod->base.inib.eobjatr = EOBJ_LOCAL_NODE;
 	nod->base.inib.enodid = 0;
@@ -239,10 +294,29 @@ static mrb_value mrb_ecnl_enode_initialize(mrb_state *mrb, mrb_value self)
 	nod->base.inib.eprpcnt = count;
 	nod->base.eprpcnt = count;
 
-	return self;
-error:
-	self = mrb_nil_value();
-	mrb_free(mrb, nod);
+	for (i = 0; i < icnt; i++) {
+		T_MRB_ECNL_EPROPERTY *prop;
+		prop = (T_MRB_ECNL_EPROPERTY *)DATA_PTR(rprop[i]);
+
+		/* インスタンスリストなどの場合は無視 */
+		switch (prop->inib.eprpcd) {
+		case 0xD3: case 0xD4: case 0xD5: case 0xD6: case 0xD7:
+		case 0x9D: case 0x9E: case 0x9F:
+			continue;
+		}
+
+		prop->eobj = self;
+		eprp[i] = &prop->inib;
+	}
+
+	for (int j = 0; j < 8; i++, j++) {
+		EPRPINIB *prop = &aprops[j];
+
+		memcpy(prop, &auto_eproperties[j], sizeof(*prop));
+
+		prop->exinf = (intptr_t)nod;
+		eprp[i] = prop;
+	}
 
 	return self;
 }
@@ -252,8 +326,155 @@ static void mrb_ecnl_enode_free(mrb_state *mrb, void *ptr)
 	ecn_node_t *nod = (ecn_node_t *)ptr;
 
 	/* ノードの設定として取り込まれた場合は破棄しない */
-	if(nod->base.svc == NULL)
+	if (nod->base.svc == NULL)
 		mrb_free(mrb, nod);
+}
+
+static int anno_prpmap_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size)
+{
+	ecn_obj_t *obj = (ecn_obj_t *)item->exinf;
+	uint8_t *count = (uint8_t *)dst;
+	uint8_t *dmap = &((uint8_t *)dst)[1];
+
+	*count = obj->eprpcnt;
+	if (obj->eprpcnt < 16) {
+		memcpy(dmap, obj->pmapAnno, *count);
+		return *count + 1;
+	}
+	else {
+		memcpy(dmap, obj->pmapAnno, 16);
+		return 17;
+	}
+}
+
+static int set_prpmap_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size)
+{
+	ecn_obj_t *obj = (ecn_obj_t *)item->exinf;
+	uint8_t *count = (uint8_t *)dst;
+	uint8_t *dmap = &((uint8_t *)dst)[1];
+
+	*count = obj->eprpcnt;
+	if (obj->eprpcnt < 16) {
+		memcpy(dmap, obj->pmapSet, *count);
+		return *count + 1;
+	}
+	else {
+		memcpy(dmap, obj->pmapSet, 16);
+		return 17;
+	}
+}
+
+static int get_prpmap_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size)
+{
+	ecn_obj_t *obj = (ecn_obj_t *)item->exinf;
+	uint8_t *count = (uint8_t *)dst;
+	uint8_t *dmap = &((uint8_t *)dst)[1];
+
+	*count = obj->eprpcnt;
+	if (obj->eprpcnt < 16) {
+		memcpy(dmap, obj->pmapGet, *count);
+		return *count + 1;
+	}
+	else {
+		memcpy(dmap, obj->pmapGet, 16);
+		return 17;
+	}
+}
+
+static int inst_count_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size)
+{
+	ecn_node_t *nod = (ecn_node_t *)item->exinf;
+	uint8_t *pos = dst;
+	int count = nod->eobj.eobjcnt;
+
+	pos[0] = count >> 16;
+	pos[1] = count >> 8;
+	pos[2] = count;
+
+	return 3;
+}
+
+static int class_count_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size)
+{
+	ecn_node_t *nod = (ecn_node_t *)item->exinf;
+	uint8_t *pos = dst;
+	int count = svc->eclscnt;
+
+	pos[0] = count >> 8;
+	pos[1] = count;
+
+	return 2;
+}
+
+static int inst_list_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size)
+{
+	ecn_node_t *nod = (ecn_node_t *)item->exinf;
+	uint8_t *pos = dst;
+	const EOBJINIB **eobjs = nod->eobj.eobjs;
+	int eobjcnt = nod->eobj.eobjcnt;
+	int inst_list_pos = svc->inst_list_pos;
+	int count = 0;
+
+	/* 通知数の位置を空けておく */
+	pos++;
+	for (int i = inst_list_pos; (i < eobjcnt) && (count < 84); i++) {
+		const EOBJINIB *eobj = eobjs[i];
+
+		*pos++ = eobj->eojx1;
+		*pos++ = eobj->eojx2;
+		*pos++ = eobj->eojx3;
+		count++;
+	}
+	*(uint8_t *)dst = count;
+
+	inst_list_pos += count;
+	/* 最後まで送信し終わっていたら初めから */
+	if (inst_list_pos >= eobjcnt)
+		inst_list_pos = 0;
+
+	svc->inst_list_pos = inst_list_pos;
+
+	return (int)pos - (int)dst;
+}
+
+static int inst_lists_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size)
+{
+	ecn_node_t *nod = (ecn_node_t *)item->exinf;
+	uint8_t *pos = dst;
+	const EOBJINIB **eobjs = nod->eobj.eobjs;
+	int eobjcnt = nod->eobj.eobjcnt;
+
+	if (eobjcnt < 255)
+		*pos++ = eobjcnt;
+	else
+		*pos++ = 255; /*オーバーフロー*/
+
+	for (int i = 0; (i < eobjcnt) && (i < 84); i++) {
+		const EOBJINIB *eobj = eobjs[i];
+
+		*pos++ = eobj->eojx1;
+		*pos++ = eobj->eojx2;
+		*pos++ = eobj->eojx3;
+	}
+
+	return (int)pos - (int)dst;
+}
+
+static int class_lists_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size)
+{
+	uint8_t *pos = dst;
+	int eclscnt = svc->eclscnt, len;
+
+	if (eclscnt < 255)
+		*pos++ = eclscnt;
+	else
+		*pos++ = 255; /*オーバーフロー*/
+
+	len = 2 * eclscnt;
+	memcpy(pos, svc->eclslst, len);
+	pos += len;
+
+	return (int)pos - (int)dst;
 }
 
 static int mrb_ecnl_prop_set(ecnl_svc_task_t *svc, const EPRPINIB *item, const void *src, int size, bool_t *anno);
@@ -334,7 +555,7 @@ static void mrb_ecnl_eproperty_free(mrb_state *mrb, void *ptr)
 	if (mrb_type(prop->eobj) != MRB_TT_DATA)
 		return;
 
-	eobj= (ecn_obj_t *)DATA_PTR(prop->eobj);
+	eobj = (ecn_obj_t *)DATA_PTR(prop->eobj);
 
 	/* プロパティの設定として取り込まれた場合は破棄しない */
 	if (eobj->svc != NULL)
@@ -492,8 +713,8 @@ static int mrb_ecnl_prop_set(ecnl_svc_task_t *svc, const EPRPINIB *item, const v
 }
 
 /*
-* データ取得関数
-*/
+ * データ取得関数
+ */
 static int mrb_ecnl_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size)
 {
 	mrb_state *mrb = svc->mrb;
@@ -726,6 +947,48 @@ static mrb_value mrb_ecnl_iterator_is_eof(mrb_state *mrb, mrb_value self)
 	return result;
 }
 
+void make_prop_map(ecn_obj_t *eobj, uint8_t *prpmap, int count, ATR flag)
+{
+	if (count < 16) {
+		uint8_t *pos = prpmap;
+		for (int i = 0; i < eobj->eprpcnt; i++) {
+			const EPRPINIB *eprp = eobj->inib.eprp[i];
+			if ((eprp->eprpatr & flag) == 0)
+				continue;
+
+			*pos++ = eprp->eprpcd;
+		}
+	}
+	else {
+		for (int i = 0; i < eobj->eprpcnt; i++) {
+			const EPRPINIB *eprp = eobj->inib.eprp[i];
+			if ((eprp->eprpatr & flag) == 0)
+				continue;
+
+			ecn_agent_set_epc_to_prop_map(eobj->inib.eprp[i]->eprpcd, prpmap);
+		}
+	}
+}
+
+void make_obj_prop_map(ecn_obj_t *eobj)
+{
+	int annocnt = 0, setcnt = 0, getcnt = 0;
+
+	for (int i = 0; i < eobj->eprpcnt; i++) {
+		ATR eprpatr = eobj->inib.eprp[i]->eprpatr;
+		if (eprpatr & EPC_RULE_ANNO)
+			annocnt++;
+		if (eprpatr & EPC_RULE_SET)
+			setcnt++;
+		if (eprpatr & EPC_RULE_GET)
+			getcnt++;
+	}
+
+	make_prop_map(eobj, eobj->pmapAnno, annocnt, EPC_RULE_ANNO);
+	make_prop_map(eobj, eobj->pmapSet, setcnt, EPC_RULE_SET);
+	make_prop_map(eobj, eobj->pmapGet, getcnt, EPC_RULE_GET);
+}
+
 static mrb_value mrb_ecnl_svctask_initialize(mrb_state *mrb, mrb_value self)
 {
 	ecnl_svc_task_t *svc;
@@ -735,7 +998,7 @@ static mrb_value mrb_ecnl_svctask_initialize(mrb_state *mrb, mrb_value self)
 	const mrb_value *eobjs;
 	ecn_device_t *device;
 	EOBJCB *eobjcb;
-	int i, count;
+	int i, eobjcnt;
 	ID id = 1;
 	ER ret;
 
@@ -763,9 +1026,11 @@ static mrb_value mrb_ecnl_svctask_initialize(mrb_state *mrb, mrb_value self)
 
 	node = (ecn_node_t *)DATA_PTR(profile);
 	eobjs = RARRAY_PTR(devices);
-	count = RARRAY_LEN(devices);
+	eobjcnt = RARRAY_LEN(devices);
 
-	svc = (ecnl_svc_task_t *)mrb_calloc(mrb, 1, sizeof(ecnl_svc_task_t) + (1 + count) * sizeof(EOBJINIB *));
+	svc = (ecnl_svc_task_t *)mrb_calloc(mrb, 1, sizeof(ecnl_svc_task_t)
+		+ (1 + eobjcnt) * sizeof(EOBJINIB *)
+		+ (2 * eobjcnt)/*クラスリスト用*/);
 	DATA_TYPE(self) = &mrb_ecnl_svctask_type;
 	DATA_PTR(self) = svc;
 
@@ -775,7 +1040,7 @@ static mrb_value mrb_ecnl_svctask_initialize(mrb_state *mrb, mrb_value self)
 	svc->mrb = mrb;
 	svc->self = self;
 	svc->tnum_enodid = 1; /* この版ではローカルノード１つ */
-	svc->tmax_eobjid = 1 + 1 + count;
+	svc->tmax_eobjid = 1 + 1 + eobjcnt;
 	svc->eobjinib_table = (const EOBJINIB **)&svc[1];
 	svc->eobjinib_table[0] = &node->base.inib;
 
@@ -786,9 +1051,10 @@ static mrb_value mrb_ecnl_svctask_initialize(mrb_state *mrb, mrb_value self)
 	node->base.eobjId = id++;
 	node->base.inib.enodid = 0;
 	eobjcb->profile = &node->base.inib;
-	eobjcb->eobjcnt = count;
+	eobjcb->eobjcnt = eobjcnt;
+	make_obj_prop_map(&node->base);
 
-	for (i = 0; i < count; i++) {
+	for (i = 0; i < eobjcnt; i++) {
 		if (!mrb_obj_is_kind_of(mrb, eobjs[i], _class_object)) {
 			mrb_raise(mrb, E_RUNTIME_ERROR, "devices");
 			goto error;
@@ -798,7 +1064,33 @@ static mrb_value mrb_ecnl_svctask_initialize(mrb_state *mrb, mrb_value self)
 		device->base.eobjId = id++;
 		device->base.inib.enodid = node->base.eobjId;
 		eobjcb->eobjs[i] = &device->base.inib;
+		make_obj_prop_map(&device->base);
 	}
+
+	/* クラスリストの作成 */
+	svc->eclslst = (uint8_t *)&svc->eobjinib_table[1 + eobjcnt];
+	uint8_t *pos = svc->eclslst;
+	int eclscnt = 0;
+	for (i = 0; i < eobjcnt; i++) {
+		const EOBJINIB *eobj = eobjcb->eobjs[i];
+
+		uint8_t *pos2 = svc->eclslst;
+		bool_t match = false;
+		for (int j = 0; j < eclscnt; j++, pos2 += 2) {
+			const EOBJINIB *eobj2 = eobjcb->eobjs[j];
+
+			match = (pos2[0] == eobj2->eojx1) && (pos2[1] = eobj2->eojx2);
+			if (match)
+				break;
+		}
+		if (match)
+			continue;
+
+		*pos++ = eobj->eojx1;
+		*pos++ = eobj->eojx2;
+		eclscnt++;
+	}
+	svc->eclscnt = eclscnt;
 
 	/* ECHONETミドルウェアを起動 */
 	ret = ecn_sta_svc(svc);
@@ -823,13 +1115,14 @@ static ecn_obj_t *cast_obj2(const EOBJINIB *inib)
 static void mrb_ecnl_svctask_free(mrb_state *mrb, void *ptr)
 {
 	ecnl_svc_task_t *svc = (ecnl_svc_task_t *)ptr;
+#if 0 /* どこかで解放しているらしい･･･ */
 	const EOBJINIB **table = svc->eobjinib_table;
 	const EOBJINIB **end = &table[svc->tmax_eobjid];
 
 	for (; table < end; table++) {
 		mrb_free(mrb, cast_obj2(*table));
 	}
-
+#endif
 	mrb_free(mrb, svc);
 }
 

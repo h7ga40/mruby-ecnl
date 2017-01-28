@@ -91,6 +91,10 @@ struct ecnl_svc_task {
 	int tnum_enodid;
 	/* ECHONET Lite オブジェクト管理ブロックのエリア */
 	EOBJCB eobjcb_table[1];
+	/* クラス数 */
+	uint_t eclscnt;
+	/* クラスリスト */
+	uint8_t *eclslst;
 	/* メールボックス */
 	T_ECN_FBS_QUEUE api_mbxid;
 	T_ECN_FBS_QUEUE svc_mbxid;
@@ -99,6 +103,8 @@ struct ecnl_svc_task {
 	uint8_t eobjlist_need_init;
 	/* シーケンス番号 */
 	uint16_t current_tid;
+	/* インスタンスリスト通知位置 */
+	int inst_list_pos;
 };
 
 TMO echonet_svctask_get_timer(ecnl_svc_task_t *svc);

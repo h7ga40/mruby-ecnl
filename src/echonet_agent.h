@@ -198,6 +198,9 @@ const EPRPINIB *ecn_agent_get_property(const EOBJINIB *fp_obj, uint8_t fa_epc, c
 ER ecn_agent_get_device_list(ecnl_svc_task_t *svc, T_ECN_FBS_QUEUE *sender, int requestid, ECN_FBS_ID *pk_req);
 ER ecn_agent_get_device_info(ecnl_svc_task_t *svc, T_ECN_FBS_QUEUE *sender, int requestid, ID eobjid, ECN_FBS_ID *pk_req);
 
+void ecn_agent_set_epc_to_prop_map(uint8_t epc, uint8_t *propMap);
+bool_t ecn_agent_contains_epc_in_prop_map(uint8_t epc, uint8_t *propMap);
+
 #ifdef __cplusplus
 }
 #endif

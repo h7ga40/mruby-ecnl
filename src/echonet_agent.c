@@ -326,7 +326,7 @@ bool_t ecn_agent_get_eoj_enodid(ecnl_svc_task_t *svc, ID eobjid, T_ECN_EOJ *eoj,
 void ecn_agent_set_epc_to_prop_map(uint8_t epc, uint8_t *propMap)
 {
 	int i, j;
-	if ((epc & 0x80) != 0)
+	if ((epc & 0x80) == 0)
 		return;
 	i = epc & 0xF;
 	j = (epc >> 4) - 8;
@@ -336,7 +336,7 @@ void ecn_agent_set_epc_to_prop_map(uint8_t epc, uint8_t *propMap)
 bool_t ecn_agent_contains_epc_in_prop_map(uint8_t epc, uint8_t *propMap)
 {
 	int i, j;
-	if ((epc & 0x80) != 0)
+	if ((epc & 0x80) == 0)
 		return false;
 	i = epc & 0xF;
 	j = (epc >> 4) - 8;

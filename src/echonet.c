@@ -500,15 +500,12 @@ ER ecn_itr_nxt(mrb_state *mrb, T_ENUM_EPC *pk_itr, uint8_t *p_epc, uint8_t *p_pd
 		return E_PAR;
 	if (!p_pdc)
 		return E_PAR;
-	if (!p_edt)
-		return E_PAR;
 	if (!pk_itr->pk_esv)
 		return E_PAR;
 
 	if (pk_itr->is_eof)
 		return E_BOVR; /* データ終了 */
-	if (	pk_itr->count <= pk_itr->got_ct
-	&&	pk_itr->next_blk_ct < 1) {
+	if (pk_itr->count <= pk_itr->got_ct && pk_itr->next_blk_ct < 1) {
 		pk_itr->is_eof = 1;			/* 終端に達した時、非0 */
 		return E_BOVR; /* データ終了 */
 	}
@@ -556,17 +553,24 @@ ER ecn_itr_nxt(mrb_state *mrb, T_ENUM_EPC *pk_itr, uint8_t *p_epc, uint8_t *p_pd
 	*p_pdc = a_ecn_prp.pdc;
 
 	if (0 < a_ecn_prp.pdc) {
-		/* 付随データを読み取る */
-		a_rd_len = 0;
-		a_ret = _ecn_fbs_get_data(mrb, a_fbs_id, p_edt, a_ecn_prp.pdc, &a_rd_len);
-		if (a_ret != E_OK)
-			goto lb_except;
-		if (a_rd_len < (ECN_FBS_SSIZE_T)a_ecn_prp.pdc) {
-			ECN_DBG_PUT_3("ecn_itr_nxt() edt read fault. rd.cur=%d,epc=0x%02X,pdc=%u",
-				pk_itr->cur, a_ecn_prp.epc , a_ecn_prp.pdc);
-			pk_itr->is_eof = 1;			/* 終端に達した時、非0 */
-			a_ret = E_BOVR;	/* データ終了 */
-			goto lb_finally;
+		if (p_edt == NULL) {
+			a_ret = _ecn_fbs_seek_rpos(a_fbs_id, a_ecn_prp.pdc);
+			if (a_ret != E_OK)
+				goto lb_except;
+		}
+		else {
+			/* 付随データを読み取る */
+			a_rd_len = 0;
+			a_ret = _ecn_fbs_get_data(mrb, a_fbs_id, p_edt, a_ecn_prp.pdc, &a_rd_len);
+			if (a_ret != E_OK)
+				goto lb_except;
+			if (a_rd_len < (ECN_FBS_SSIZE_T)a_ecn_prp.pdc) {
+				ECN_DBG_PUT_3("ecn_itr_nxt() edt read fault. rd.cur=%d,epc=0x%02X,pdc=%u",
+					pk_itr->cur, a_ecn_prp.epc , a_ecn_prp.pdc);
+				pk_itr->is_eof = 1;			/* 終端に達した時、非0 */
+				a_ret = E_BOVR;	/* データ終了 */
+				goto lb_finally;
+			}
 		}
 	}
 	pk_itr->got_ct++;

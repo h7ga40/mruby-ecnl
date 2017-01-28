@@ -635,6 +635,46 @@ const EOBJINIB *_ecn_eoj_fnd(const EOBJCB *fp_nod, const T_ECN_EOJ *fp_eoj)
 	return 0;
 }
 
+/*
+ * 電文の構成要素数とサイズのチェックを行う
+ */
+static bool_t _ecn_tsk_check_format(ecnl_svc_task_t *svc, T_EDATA *edata, int len)
+{
+	mrb_state *mrb = svc->mrb;
+	ER ret;
+	T_ENUM_EPC enm;
+	int opc;
+	uint8_t epc;
+	uint8_t pdc;
+
+	len -= sizeof(T_ECN_HDR) + sizeof(T_ECN_EDATA_BODY);
+
+	ret = ecn_itr_ini(&enm, edata);
+	if (ret != E_OK) {
+		return false;
+	}
+	opc = enm.count;
+	for (;;) {
+		ret = ecn_itr_nxt(mrb, &enm, &epc, &pdc, NULL);
+		if (enm.is_eof)
+			break;
+		if (ret == E_BOVR){
+			if (opc != 0)
+				return false;
+			opc = enm.count;
+			len -= 1;
+			continue;
+		}
+		if (ret != E_OK)
+			break;
+
+		opc--;
+		len -= sizeof(T_ECN_PRP) + pdc;
+	}
+
+	return (opc == 0) && (len == 0);
+}
+
 static int _ecn_tsk_ecn_msg_main(ecnl_svc_task_t *svc, ECN_FBS_ID fa_fbs_id, const EOBJINIB *p_obj, ATR eobjatr,
 	const EOBJINIB *p_sobj, ATR sobjatr);
 
@@ -673,7 +713,7 @@ static void _ecn_tsk_ecn_msg(ecnl_svc_task_t *svc, intptr_t fa_exinf, ECN_FBS_ID
 		return;
 	}
 
-	if (p_esv->edata.seoj.eojx3 > 0x7F) {
+	if ((p_esv->edata.seoj.eojx3 > 0x7F) || (p_esv->edata.seoj.eojx3 == 0x00)) {
 		ECN_DBG_PUT_1("_ecn_tsk_ecn_msg() format fault: seoj %06X",
 			p_esv->edata.seoj.eojx1 << 16 | p_esv->edata.seoj.eojx2 << 8 | p_esv->edata.seoj.eojx3);
 		return;
@@ -681,6 +721,17 @@ static void _ecn_tsk_ecn_msg(ecnl_svc_task_t *svc, intptr_t fa_exinf, ECN_FBS_ID
 
 	if ((p_esv->edata.esv & 0xC0) != 0x40) {
 		ECN_DBG_PUT_1("_ecn_tsk_ecn_msg() format fault: esv 0x%02X", p_esv->edata.esv);
+		return;
+	}
+
+	if (p_esv->edata.opc == 0x00) {
+		ECN_DBG_PUT_1("_ecn_tsk_ecn_msg() format fault: opc 0x%02X", p_esv->edata.opc);
+		return;
+	}
+
+	/* 電文の構成要素数とサイズのチェックを行う */
+	if (!_ecn_tsk_check_format(svc, (T_EDATA *)fa_fbs_id.ptr, fa_fbs_id.ptr->hdr.length)) {
+		ECN_DBG_PUT("_ecn_tsk_ecn_msg() format fault");
 		return;
 	}
 
