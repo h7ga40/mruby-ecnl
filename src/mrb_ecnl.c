@@ -93,6 +93,11 @@ const static EPRPINIB auto_eproperties[] = {
 	{0xD7, EPC_RULE_GET, 255, 0, NULL, class_lists_prop_get},
 };
 
+static T_MRB_ECNL_EPROPERTY *cast_prop(const EPRPINIB *inib)
+{
+	return (T_MRB_ECNL_EPROPERTY *)((intptr_t)inib - offsetof(T_MRB_ECNL_EPROPERTY, inib));
+}
+
 static mrb_value mrb_ecnl_eobject_initialize(mrb_state *mrb, mrb_value self)
 {
 	ecn_device_t *obj;
@@ -155,6 +160,7 @@ static mrb_value mrb_ecnl_eobject_initialize(mrb_state *mrb, mrb_value self)
 
 	obj->node = (ecn_node_t *)DATA_PTR(node);
 
+	count = 0;
 	for (i = 0; i < icnt; i++) {
 		T_MRB_ECNL_EPROPERTY *prop;
 		prop = (T_MRB_ECNL_EPROPERTY *)DATA_PTR(rprop[i]);
@@ -166,16 +172,16 @@ static mrb_value mrb_ecnl_eobject_initialize(mrb_state *mrb, mrb_value self)
 		}
 
 		prop->eobj = self;
-		eprp[i] = &prop->inib;
+		eprp[count++] = &prop->inib;
 	}
 
-	for (int j = 0; j < 3; i++, j++) {
+	for (int j = 0; j < 3; j++) {
 		EPRPINIB *prop = &aprops[j];
 
 		memcpy(prop, &auto_eproperties[j], sizeof(*prop));
 
 		prop->exinf = (intptr_t)obj;
-		eprp[i] = prop;
+		eprp[count++] = prop;
 	}
 
 	return self;
@@ -184,10 +190,26 @@ static mrb_value mrb_ecnl_eobject_initialize(mrb_state *mrb, mrb_value self)
 static void mrb_ecnl_eobject_free(mrb_state *mrb, void *ptr)
 {
 	ecn_device_t *obj = (ecn_device_t *)ptr;
+	T_MRB_ECNL_EPROPERTY *prop;
 
 	/* 機器オブジェクトの設定として取り込まれた場合は破棄しない */
-	if (obj->base.svc == NULL)
-		mrb_free(mrb, obj);
+	if (obj->base.svc != NULL)
+		return;
+
+	for (int i = 0; i < obj->base.eprpcnt; i++) {
+		const EPRPINIB *eprp = obj->base.inib.eprp[i];
+
+		switch (eprp->eprpcd) {
+		case 0x9D: case 0x9E: case 0x9F:
+			continue;
+		}
+
+		prop = cast_prop(eprp);
+
+		mrb_free(mrb, prop);
+	}
+
+	mrb_free(mrb, obj);
 }
 
 static mrb_value mrb_ecnl_eobject_data_prop_set(mrb_state *mrb, mrb_value self)
@@ -294,6 +316,7 @@ static mrb_value mrb_ecnl_enode_initialize(mrb_state *mrb, mrb_value self)
 	nod->base.inib.eprpcnt = count;
 	nod->base.eprpcnt = count;
 
+	count = 0;
 	for (i = 0; i < icnt; i++) {
 		T_MRB_ECNL_EPROPERTY *prop;
 		prop = (T_MRB_ECNL_EPROPERTY *)DATA_PTR(rprop[i]);
@@ -306,16 +329,16 @@ static mrb_value mrb_ecnl_enode_initialize(mrb_state *mrb, mrb_value self)
 		}
 
 		prop->eobj = self;
-		eprp[i] = &prop->inib;
+		eprp[count++] = &prop->inib;
 	}
 
-	for (int j = 0; j < 8; i++, j++) {
+	for (int j = 0; j < 8; j++) {
 		EPRPINIB *prop = &aprops[j];
 
 		memcpy(prop, &auto_eproperties[j], sizeof(*prop));
 
 		prop->exinf = (intptr_t)nod;
-		eprp[i] = prop;
+		eprp[count++] = prop;
 	}
 
 	return self;
@@ -324,22 +347,40 @@ static mrb_value mrb_ecnl_enode_initialize(mrb_state *mrb, mrb_value self)
 static void mrb_ecnl_enode_free(mrb_state *mrb, void *ptr)
 {
 	ecn_node_t *nod = (ecn_node_t *)ptr;
+	T_MRB_ECNL_EPROPERTY *prop;
 
 	/* ノードの設定として取り込まれた場合は破棄しない */
-	if (nod->base.svc == NULL)
-		mrb_free(mrb, nod);
+	if (nod->base.svc != NULL)
+		return;
+
+	for (int i = 0; i < nod->base.eprpcnt; i++) {
+		const EPRPINIB *eprp = nod->base.inib.eprp[i];
+
+		switch (eprp->eprpcd) {
+		case 0xD3: case 0xD4: case 0xD5: case 0xD6: case 0xD7:
+		case 0x9D: case 0x9E: case 0x9F:
+			continue;
+		}
+
+		prop = cast_prop(eprp);
+
+		mrb_free(mrb, prop);
+	}
+
+	mrb_free(mrb, nod);
 }
 
 static int anno_prpmap_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size)
 {
 	ecn_obj_t *obj = (ecn_obj_t *)item->exinf;
-	uint8_t *count = (uint8_t *)dst;
 	uint8_t *dmap = &((uint8_t *)dst)[1];
+	uint8_t count;
 
-	*count = obj->eprpcnt;
-	if (obj->eprpcnt < 16) {
-		memcpy(dmap, obj->pmapAnno, *count);
-		return *count + 1;
+	count = obj->annocnt;
+	*(uint8_t *)dst = count;
+	if (count < 16) {
+		memcpy(dmap, obj->pmapAnno, count);
+		return count + 1;
 	}
 	else {
 		memcpy(dmap, obj->pmapAnno, 16);
@@ -350,13 +391,14 @@ static int anno_prpmap_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void
 static int set_prpmap_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size)
 {
 	ecn_obj_t *obj = (ecn_obj_t *)item->exinf;
-	uint8_t *count = (uint8_t *)dst;
 	uint8_t *dmap = &((uint8_t *)dst)[1];
+	uint8_t count;
 
-	*count = obj->eprpcnt;
-	if (obj->eprpcnt < 16) {
-		memcpy(dmap, obj->pmapSet, *count);
-		return *count + 1;
+	count = obj->setcnt;
+	*(uint8_t *)dst = count;
+	if (count < 16) {
+		memcpy(dmap, obj->pmapSet, count);
+		return count + 1;
 	}
 	else {
 		memcpy(dmap, obj->pmapSet, 16);
@@ -367,13 +409,14 @@ static int set_prpmap_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void 
 static int get_prpmap_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *dst, int size)
 {
 	ecn_obj_t *obj = (ecn_obj_t *)item->exinf;
-	uint8_t *count = (uint8_t *)dst;
 	uint8_t *dmap = &((uint8_t *)dst)[1];
+	uint8_t count;
 
-	*count = obj->eprpcnt;
-	if (obj->eprpcnt < 16) {
-		memcpy(dmap, obj->pmapGet, *count);
-		return *count + 1;
+	count = obj->getcnt;
+	*(uint8_t *)dst = count;
+	if (count < 16) {
+		memcpy(dmap, obj->pmapGet, count);
+		return count + 1;
 	}
 	else {
 		memcpy(dmap, obj->pmapGet, 16);
@@ -385,7 +428,8 @@ static int inst_count_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void 
 {
 	ecn_node_t *nod = (ecn_node_t *)item->exinf;
 	uint8_t *pos = dst;
-	int count = nod->eobj.eobjcnt;
+	EOBJCB *obj = &svc->eobjcb_table[nod->base.eobjId - 1];
+	int count = obj->eobjcnt;
 
 	pos[0] = count >> 16;
 	pos[1] = count >> 8;
@@ -410,8 +454,9 @@ static int inst_list_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void *
 {
 	ecn_node_t *nod = (ecn_node_t *)item->exinf;
 	uint8_t *pos = dst;
-	const EOBJINIB **eobjs = nod->eobj.eobjs;
-	int eobjcnt = nod->eobj.eobjcnt;
+	EOBJCB *obj = &svc->eobjcb_table[nod->base.eobjId - 1];
+	const EOBJINIB **eobjs = obj->eobjs;
+	int eobjcnt = obj->eobjcnt;
 	int inst_list_pos = svc->inst_list_pos;
 	int count = 0;
 
@@ -441,8 +486,9 @@ static int inst_lists_prop_get(ecnl_svc_task_t *svc, const EPRPINIB *item, void 
 {
 	ecn_node_t *nod = (ecn_node_t *)item->exinf;
 	uint8_t *pos = dst;
-	const EOBJINIB **eobjs = nod->eobj.eobjs;
-	int eobjcnt = nod->eobj.eobjcnt;
+	EOBJCB *obj = &svc->eobjcb_table[nod->base.eobjId - 1];
+	const EOBJINIB **eobjs = obj->eobjs;
+	int eobjcnt = obj->eobjcnt;
 
 	if (eobjcnt < 255)
 		*pos++ = eobjcnt;
@@ -552,14 +598,13 @@ static void mrb_ecnl_eproperty_free(mrb_state *mrb, void *ptr)
 	if (ptr == NULL)
 		return;
 
-	if (mrb_type(prop->eobj) != MRB_TT_DATA)
-		return;
+	if (mrb_type(prop->eobj) == MRB_TT_DATA) {
+		eobj = (ecn_obj_t *)DATA_PTR(prop->eobj);
 
-	eobj = (ecn_obj_t *)DATA_PTR(prop->eobj);
-
-	/* プロパティの設定として取り込まれた場合は破棄しない */
-	if (eobj->svc != NULL)
-		return;
+		/* プロパティの設定として取り込まれた場合は破棄しない */
+		if (eobj != NULL)
+			return;
+	}
 
 	mrb_free(mrb, prop);
 }
@@ -673,11 +718,6 @@ static mrb_value mrb_ecnl_eproperty_set_anno(mrb_state *mrb, mrb_value self)
 	return anno;
 }
 
-static T_MRB_ECNL_EPROPERTY *cast_prop(const EPRPINIB *inib)
-{
-	return (T_MRB_ECNL_EPROPERTY *)((intptr_t)inib - offsetof(T_MRB_ECNL_EPROPERTY, inib));
-}
-
 /*
  * データ設定関数
  */
@@ -776,6 +816,7 @@ mrb_value mrb_ecnl_edata_new(mrb_state *mrb, T_EDATA *data)
 
 	return resv;
 }
+
 /* プロパティ値書き込み・読み出し要求電文折り返し指定 */
 static mrb_value mrb_ecnl_trn_set_get(mrb_state *mrb, mrb_value self)
 {
@@ -983,6 +1024,9 @@ void make_obj_prop_map(ecn_obj_t *eobj)
 		if (eprpatr & EPC_RULE_GET)
 			getcnt++;
 	}
+	eobj->annocnt = annocnt;
+	eobj->setcnt = setcnt;
+	eobj->getcnt = getcnt;
 
 	make_prop_map(eobj, eobj->pmapAnno, annocnt, EPC_RULE_ANNO);
 	make_prop_map(eobj, eobj->pmapSet, setcnt, EPC_RULE_SET);

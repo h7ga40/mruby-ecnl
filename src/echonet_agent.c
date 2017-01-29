@@ -676,7 +676,6 @@ void ecn_agent_progress(ecnl_svc_task_t *svc, TMO interval)
 }
 
 void ecn_agent_timeout(ecnl_svc_task_t *svc)
-
 {
 	ecn_agent_t *agent = &svc->agent;
 	ecn_node_agent_t *node;
@@ -781,7 +780,6 @@ void ecn_agent_proc_ecn_msg(ecnl_svc_task_t *svc, const EOBJCB **ppk_snod, const
 }
 
 void ecn_agent_proc_ecn_msg_end(ecnl_svc_task_t *svc)
-
 {
 	ecn_agent_t *agent = &svc->agent;
 	ecn_node_agent_t *node = agent->current_node;

@@ -67,11 +67,14 @@ typedef struct ecn_obj
 	ecnl_svc_task_t *svc;
 	ID eobjId;
 	EOBJINIB inib;
-	uint8_t pmapFlag;
 	uint8_t pmapSet[16];		/* SETプロパティマップ */
 	uint8_t pmapGet[16];		/* GETプロパティマップ */
 	uint8_t pmapAnno[16];		/* 状態変化時通知プロパティマップ */
-	uint_t eprpcnt;				/* ECHONET Lite プロパティ数 */
+	uint8_t pmapFlag;
+	uint8_t eprpcnt;			/* ECHONET Lite プロパティ数 */
+	uint8_t annocnt;			/* 通知プロパティの数 */
+	uint8_t setcnt;				/* 設定プロパティの数 */
+	uint8_t getcnt;				/* 取得プロパティの数 */
 } ecn_obj_t;
 
 typedef struct ecn_node
